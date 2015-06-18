@@ -102,7 +102,8 @@ class Sanitizer
      */
     public function sanitize($dirty)
     {
-        $this->xmlDocument->loadXML($dirty);
+        // Suppress the errors because we don't really have to worry about formation before cleansing
+        @$this->xmlDocument->loadXML($dirty);
 
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
