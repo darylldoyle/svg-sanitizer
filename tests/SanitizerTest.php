@@ -67,4 +67,30 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
         $this->assertInternalType('array', $attributes);
         $this->assertEquals(TestAllowedAttributes::getAttributes(), $attributes);
     }
+
+    /**
+     * Test that malicious elements and attributes are removed from standard XML
+     */
+    public function testSanitizeXMLDoc()
+    {
+        $initialData = file_get_contents('tests/data/xmlTestOne.xml');
+        $expected = file_get_contents('tests/data/xmlCleanOne.xml');
+
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Test that malicious elements and attributes are removed from an SVG
+     */
+    public function testSanitizeSVGDoc()
+    {
+        $initialData = file_get_contents('tests/data/svgTestOne.svg');
+        $expected = file_get_contents('tests/data/svgCleanOne.svg');
+
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }
