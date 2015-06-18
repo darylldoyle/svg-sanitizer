@@ -102,12 +102,41 @@ class Sanitizer
      */
     public function sanitize($dirty)
     {
-        $this->xmlDocument->loadHTML($dirty);
+        $this->xmlDocument->loadXML($dirty);
 
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
+        // loop through all elements
+        // we do this backwards so we don't skip anything if we delete a node
+        // see comments at: http://php.net/manual/en/class.domnamednodemap.php
+        for ($i = $allElements->length - 1; $i >= 0; $i--) {
+            $currentElement = $allElements->item($i);
+
+            // If the tag isn't in the whitelist, remove it and continue with next iteration
+            if (!in_array($currentElement->tagName, $this->allowedTags)) {
+                $currentElement->parentNode->removeChild($currentElement);
+                continue;
+            }
+
+            // loop through all attributes, see above for reason we go backwards
+            for ($x = $currentElement->attributes->length - 1; $x >= 0; $x--) {
+                // get attribute name
+                $attrName = $currentElement->attributes->item($x)->name;
+
+                // Remove attribute if not in whitelist
+                if (!in_array($attrName, $this->allowedAttrs)) {
+                    $currentElement->removeAttribute($attrName);
+                }
+            }
+        }
+
+        // Save cleaned XML to a variable
+        $clean = $this->xmlDocument->saveXML();
+
+        // Reset DOMDocument to a clean state in case we use it again
         $this->resetInternal();
 
-        return $allElements;
+        // Return result
+        return $clean;
     }
 }
