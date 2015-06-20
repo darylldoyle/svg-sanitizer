@@ -102,6 +102,11 @@ class Sanitizer
      */
     public function sanitize($dirty)
     {
+        // Don't run on an empty string
+        if (empty($dirty)) {
+            return '';
+        }
+
         // Suppress the errors because we don't really have to worry about formation before cleansing
         @$this->xmlDocument->loadXML($dirty);
 

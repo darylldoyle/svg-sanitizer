@@ -36,6 +36,9 @@ You may pass your own whitelist of tags and attributes by using the `Sanitizer::
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
 
+## Demo
+There is a demo available at: [http://svg.enshrined.co.uk/](http://svg.enshrined.co.uk/)
+
 ## Tests
 
 You can run these by running `phpunit`
