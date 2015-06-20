@@ -137,7 +137,7 @@ class Sanitizer
         }
 
         // Save cleaned XML to a variable
-        $clean = $this->xmlDocument->saveXML();
+        $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement);
 
         // Reset DOMDocument to a clean state in case we use it again
         $this->resetInternal();
