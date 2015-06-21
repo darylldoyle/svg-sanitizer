@@ -34,6 +34,11 @@ class Sanitizer
     protected $allowedAttrs;
 
     /**
+     * @var
+     */
+    protected $xmlLoaderValue;
+
+    /**
      *
      */
     function __construct()
@@ -52,6 +57,7 @@ class Sanitizer
     {
         $this->xmlDocument = new DOMDocument();
         $this->xmlDocument->preserveWhiteSpace = true;
+        $this->xmlDocument->recover = true;
     }
 
     /**
@@ -107,9 +113,21 @@ class Sanitizer
             return '';
         }
 
+        // Turn off the entity loader
+        $this->xmlLoaderValue = libxml_disable_entity_loader(true);
+
         // Suppress the errors because we don't really have to worry about formation before cleansing
         @$this->xmlDocument->loadXML($dirty);
 
+        // We're using this loop to remove the XML Doctype
+        // Whilst it may be caught below on output, that seems to be buggy, so we need to make sure it's gone
+        foreach ($this->xmlDocument->childNodes as $child) {
+            if ($child->nodeType === XML_DOCUMENT_TYPE_NODE) {
+                $child->parentNode->removeChild($child);
+            }
+        }
+
+        // Grab all the elements
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
         // loop through all elements
@@ -141,6 +159,9 @@ class Sanitizer
 
         // Reset DOMDocument to a clean state in case we use it again
         $this->resetInternal();
+
+        // Reset the entity loader3
+        libxml_disable_entity_loader($this->xmlLoaderValue);
 
         // Return result
         return $clean;
