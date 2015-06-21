@@ -57,7 +57,6 @@ class Sanitizer
     {
         $this->xmlDocument = new DOMDocument();
         $this->xmlDocument->preserveWhiteSpace = true;
-        $this->xmlDocument->recover = true;
     }
 
     /**
