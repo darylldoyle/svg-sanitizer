@@ -56,7 +56,9 @@ class Sanitizer
     protected function resetInternal()
     {
         $this->xmlDocument = new DOMDocument();
-        $this->xmlDocument->preserveWhiteSpace = true;
+        $this->xmlDocument->preserveWhiteSpace = false;
+        $this->xmlDocument->strictErrorChecking = false;
+        $this->xmlDocument->formatOutput = true;
     }
 
     /**
@@ -116,7 +118,19 @@ class Sanitizer
         $this->xmlLoaderValue = libxml_disable_entity_loader(true);
 
         // Suppress the errors because we don't really have to worry about formation before cleansing
-        @$this->xmlDocument->loadXML($dirty);
+        libxml_use_internal_errors(true);
+
+        $loaded = $this->xmlDocument->loadXML($dirty);
+
+        // If we couldn't parse the XML then we go no further. Reset and return false
+        if (!$loaded) {
+            // Reset DOMDocument to a clean state in case we use it again
+            $this->resetInternal();
+
+            // Reset the entity loader3
+            libxml_disable_entity_loader($this->xmlLoaderValue);
+            return false;
+        }
 
         // We're using this loop to remove the XML Doctype
         // Whilst it may be caught below on output, that seems to be buggy, so we need to make sure it's gone

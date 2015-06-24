@@ -93,4 +93,16 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
 
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+    /**
+     * Test that a badly formatted XML document returns false
+     */
+    public function testBadXMLReturnsFalse()
+    {
+        $initialData = file_get_contents('tests/data/badXmlTestOne.svg');
+
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertEquals(false, $cleanData);
+    }
 }
