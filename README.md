@@ -30,6 +30,10 @@ $cleanSVG = $sanitizer->sanitize($dirtySVG);
 
 ```
 
+## Output
+
+This will either return a sanitized SVG/XML string or boolean `false` if XML parsing failed (usually due to a badly formatted file).
+
 ## Options
 
 You may pass your own whitelist of tags and attributes by using the `Sanitizer::setAllowedTags` and `Sanitizer::setAllowedAttrs` methods respectively.
