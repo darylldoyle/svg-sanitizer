@@ -165,6 +165,18 @@ class Sanitizer
                     $currentElement->removeAttribute($attrName);
                 }
             }
+
+            $xlinks = $currentElement->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+            if (preg_match("/(?:\w+script|data):/xi", $xlinks) === 1) {
+                var_dump($xlinks);
+                $currentElement->removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+            }
+
+            $href = $currentElement->getAttribute('href');
+            if (preg_match("/(?:\w+script|data):/xi", $href) === 1) {
+                var_dump($href);
+                $currentElement->removeAttribute('href');
+            }
         }
 
         // Save cleaned XML to a variable

@@ -105,4 +105,17 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
 
         $this->assertEquals(false, $cleanData);
     }
+
+    /**
+     * Make sure that hrefs get sanitized correctly
+     */
+    public function testSanitizeHrefs()
+    {
+        $initialData = file_get_contents('tests/data/hrefTestOne.svg');
+        $expected = file_get_contents('tests/data/hrefCleanOne.svg');
+
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }
