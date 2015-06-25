@@ -19,6 +19,11 @@ class Sanitizer
 {
 
     /**
+     * Regex to catch script and data values in attributes
+     */
+    const SCRIPT_REGEX = '/(?:\w+script|data):/xi';
+
+    /**
      * @var DOMDocument
      */
     protected $xmlDocument;
@@ -62,26 +67,6 @@ class Sanitizer
     }
 
     /**
-     * Set custom allowed tags
-     *
-     * @param TagInterface $allowedTags
-     */
-    public function setAllowedTags(TagInterface $allowedTags)
-    {
-        $this->allowedTags = $allowedTags::getTags();
-    }
-
-    /**
-     * Set custom allowed attributes
-     *
-     * @param AttributeInterface $allowedAttrs
-     */
-    public function setAllowedAttrs(AttributeInterface $allowedAttrs)
-    {
-        $this->allowedAttrs = $allowedAttrs::getAttributes();
-    }
-
-    /**
      * Get the array of allowed tags
      *
      * @return array
@@ -92,6 +77,16 @@ class Sanitizer
     }
 
     /**
+     * Set custom allowed tags
+     *
+     * @param TagInterface $allowedTags
+     */
+    public function setAllowedTags(TagInterface $allowedTags)
+    {
+        $this->allowedTags = $allowedTags::getTags();
+    }
+
+    /**
      * Get the array of allowed attributes
      *
      * @return array
@@ -99,6 +94,16 @@ class Sanitizer
     public function getAllowedAttrs()
     {
         return $this->allowedAttrs;
+    }
+
+    /**
+     * Set custom allowed attributes
+     *
+     * @param AttributeInterface $allowedAttrs
+     */
+    public function setAllowedAttrs(AttributeInterface $allowedAttrs)
+    {
+        $this->allowedAttrs = $allowedAttrs::getAttributes();
     }
 
     /**
@@ -114,40 +119,81 @@ class Sanitizer
             return '';
         }
 
-        // Turn off the entity loader
-        $this->xmlLoaderValue = libxml_disable_entity_loader(true);
-
-        // Suppress the errors because we don't really have to worry about formation before cleansing
-        libxml_use_internal_errors(true);
+        $this->setUpBefore();
 
         $loaded = $this->xmlDocument->loadXML($dirty);
 
         // If we couldn't parse the XML then we go no further. Reset and return false
         if (!$loaded) {
-            // Reset DOMDocument to a clean state in case we use it again
-            $this->resetInternal();
-
-            // Reset the entity loader3
-            libxml_disable_entity_loader($this->xmlLoaderValue);
+            $this->resetAfter();
             return false;
         }
 
-        // We're using this loop to remove the XML Doctype
-        // Whilst it may be caught below on output, that seems to be buggy, so we need to make sure it's gone
+        $this->removeDoctype();
+
+        // Grab all the elements
+        $allElements = $this->xmlDocument->getElementsByTagName("*");
+
+        // Start the cleaning proccess
+        $this->startClean($allElements);
+
+        // Save cleaned XML to a variable
+        $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement);
+
+        $this->resetAfter();
+        // Return result
+        return $clean;
+    }
+
+    /**
+     * Set up libXML before we start
+     */
+    protected function setUpBefore()
+    {
+        // Turn off the entity loader
+        $this->xmlLoaderValue = libxml_disable_entity_loader(true);
+
+        // Suppress the errors because we don't really have to worry about formation before cleansing
+        libxml_use_internal_errors(true);
+    }
+
+    /**
+     * Reset the class after use
+     */
+    protected function resetAfter()
+    {
+        // Reset DOMDocument to a clean state in case we use it again
+        $this->resetInternal();
+
+        // Reset the entity loader3
+        libxml_disable_entity_loader($this->xmlLoaderValue);
+    }
+
+    /**
+     * Remove the XML Doctype
+     * It may be caught later on output but that seems to be buggy, so we need to make sure it's gone
+     */
+    protected function removeDoctype()
+    {
         foreach ($this->xmlDocument->childNodes as $child) {
             if ($child->nodeType === XML_DOCUMENT_TYPE_NODE) {
                 $child->parentNode->removeChild($child);
             }
         }
+    }
 
-        // Grab all the elements
-        $allElements = $this->xmlDocument->getElementsByTagName("*");
-
+    /**
+     * Start the cleaning with tags, then we move onto attributes and hrefs later
+     *
+     * @param \DOMNodeList $elements
+     */
+    protected function startClean(\DOMNodeList $elements)
+    {
         // loop through all elements
         // we do this backwards so we don't skip anything if we delete a node
         // see comments at: http://php.net/manual/en/class.domnamednodemap.php
-        for ($i = $allElements->length - 1; $i >= 0; $i--) {
-            $currentElement = $allElements->item($i);
+        for ($i = $elements->length - 1; $i >= 0; $i--) {
+            $currentElement = $elements->item($i);
 
             // If the tag isn't in the whitelist, remove it and continue with next iteration
             if (!in_array($currentElement->tagName, $this->allowedTags)) {
@@ -155,40 +201,55 @@ class Sanitizer
                 continue;
             }
 
-            // loop through all attributes, see above for reason we go backwards
-            for ($x = $currentElement->attributes->length - 1; $x >= 0; $x--) {
-                // get attribute name
-                $attrName = $currentElement->attributes->item($x)->name;
+            $this->cleanAttributesOnWhitelist($currentElement);
 
-                // Remove attribute if not in whitelist
-                if (!in_array($attrName, $this->allowedAttrs)) {
-                    $currentElement->removeAttribute($attrName);
-                }
-            }
+            $this->cleanXlinkHrefs($currentElement);
 
-            $xlinks = $currentElement->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
-            if (preg_match("/(?:\w+script|data):/xi", $xlinks) === 1) {
-                var_dump($xlinks);
-                $currentElement->removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
-            }
+            $this->cleanHrefs($currentElement);
+        }
+    }
 
-            $href = $currentElement->getAttribute('href');
-            if (preg_match("/(?:\w+script|data):/xi", $href) === 1) {
-                var_dump($href);
-                $currentElement->removeAttribute('href');
+    /**
+     * Only allow attributes that are on the whitelist
+     *
+     * @param \DOMElement $element
+     */
+    protected function cleanAttributesOnWhitelist(\DOMElement $element)
+    {
+        for ($x = $element->attributes->length - 1; $x >= 0; $x--) {
+            // get attribute name
+            $attrName = $element->attributes->item($x)->name;
+
+            // Remove attribute if not in whitelist
+            if (!in_array($attrName, $this->allowedAttrs)) {
+                $element->removeAttribute($attrName);
             }
         }
+    }
 
-        // Save cleaned XML to a variable
-        $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement);
+    /**
+     * Clean the xlink:hrefs of script and data embeds
+     *
+     * @param \DOMElement $element
+     */
+    protected function cleanXlinkHrefs(\DOMElement &$element)
+    {
+        $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if (preg_match(self::SCRIPT_REGEX, $xlinks) === 1) {
+            $element->removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        }
+    }
 
-        // Reset DOMDocument to a clean state in case we use it again
-        $this->resetInternal();
-
-        // Reset the entity loader3
-        libxml_disable_entity_loader($this->xmlLoaderValue);
-
-        // Return result
-        return $clean;
+    /**
+     * Clean the hrefs of script and data embeds
+     *
+     * @param \DOMElement $element
+     */
+    protected function cleanHrefs(\DOMElement &$element)
+    {
+        $href = $element->getAttribute('href');
+        if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
+            $element->removeAttribute('href');
+        }
     }
 }
