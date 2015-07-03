@@ -43,6 +43,10 @@ These methods require that you implement the `enshrined\svgSanitize\data\TagInte
 ## Demo
 There is a demo available at: [http://svg.enshrined.co.uk/](http://svg.enshrined.co.uk/)
 
+## WordPress
+
+I've just released a WordPress plugin containing this code so you can sanitize your WordPress uploads. It's available from the WordPress plugin directory: [https://wordpress.org/plugins/safe-svg/](https://wordpress.org/plugins/safe-svg/)
+
 ## Tests
 
 You can run these by running `phpunit`
