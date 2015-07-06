@@ -138,7 +138,7 @@ class Sanitizer
         $this->startClean($allElements);
 
         // Save cleaned XML to a variable
-        $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement);
+        $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, LIBXML_NOEMPTYTAG);
 
         $this->resetAfter();
         // Return result
