@@ -8,7 +8,9 @@ php:
   - hhvm
 
 before_script:
+  - phpenv global 5.3
   - composer install --dev
+  - phpenv global "$TRAVIS_PHP_VERSION"
 
 addons:
   code_climate:
