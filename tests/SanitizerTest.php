@@ -23,7 +23,6 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
     public function setUp()
     {
         $this->class = new Sanitizer();
-        $this->class->getAllowedAttrs();
     }
 
     /**
