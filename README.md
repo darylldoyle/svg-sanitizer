@@ -47,6 +47,10 @@ There is a demo available at: [http://svg.enshrined.co.uk/](http://svg.enshrined
 
 I've just released a WordPress plugin containing this code so you can sanitize your WordPress uploads. It's available from the WordPress plugin directory: [https://wordpress.org/plugins/safe-svg/](https://wordpress.org/plugins/safe-svg/)
 
+## Drupal
+
+[Michael Potter](https://github.com/heyMP) has kindly created a Drupal module for this library which is available at: [https://www.drupal.org/project/svg_sanitizer](https://www.drupal.org/project/svg_sanitizer)
+
 ## Tests
 
 You can run these by running `phpunit`
