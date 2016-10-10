@@ -40,6 +40,10 @@ You may pass your own whitelist of tags and attributes by using the `Sanitizer::
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
 
+## Minification
+
+You can minify the XML output by calling `$sanitiser->minify(true);`.
+
 ## Demo
 There is a demo available at: [http://svg.enshrined.co.uk/](http://svg.enshrined.co.uk/)
 

@@ -44,6 +44,11 @@ class Sanitizer
     protected $xmlLoaderValue;
 
     /**
+     * @var bool
+     */
+    protected $minifyXML = false;
+
+    /**
      *
      */
     function __construct()
@@ -64,6 +69,11 @@ class Sanitizer
         $this->xmlDocument->preserveWhiteSpace = false;
         $this->xmlDocument->strictErrorChecking = false;
         $this->xmlDocument->formatOutput = true;
+
+        // Maybe don't format the output
+        if($this->minifyXML) {
+            $this->xmlDocument->formatOutput = false;
+        }
     }
 
     /**
@@ -141,6 +151,12 @@ class Sanitizer
         $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, LIBXML_NOEMPTYTAG);
 
         $this->resetAfter();
+
+        // Remove any extra whitespaces when minifying
+        if($this->minifyXML) {
+            $clean = preg_replace('/\s+/', ' ', $clean);
+        }
+
         // Return result
         return $clean;
     }
@@ -251,5 +267,15 @@ class Sanitizer
         if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
             $element->removeAttribute('href');
         }
+    }
+
+    /**
+     * Should we minify the output?
+     *
+     * @param bool $shouldMinify
+     */
+    public function minify($shouldMinify = false)
+    {
+        $this->minifyXML = (bool) $shouldMinify;
     }
 }
