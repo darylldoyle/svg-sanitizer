@@ -44,7 +44,7 @@ class AllowedAttributes implements AttributeInterface
             'font-weight','image-rendering','in','in2','k1','k2','k3','k4','kerning',
             'letter-spacing','lighting-color','local','marker-end','marker-mid',
             'marker-start','max','mask','mode','min','offset','operator','opacity',
-            'order','overflow','paint-order','path','points','r','rx','ry','radius',
+            'order','orient','overflow','paint-order','path','points','r','rx','ry','radius',
             'restart','scale','seed','shape-rendering','stop-color','stop-opacity',
             'stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin',
             'stroke-miterlimit','stroke-opacity','stroke','stroke-width','transform',
