@@ -40,6 +40,14 @@ You may pass your own whitelist of tags and attributes by using the `Sanitizer::
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
 
+## Remove remote references 
+
+You have the option to remove attributes that reference remote files, this will stop HTTP leaks but will add an overhead to the sanitiser.
+
+This defaults to false, set to true to remove references.
+
+`$sanitizer->removeRemoteReferences(true);`
+
 ## Minification
 
 You can minify the XML output by calling `$sanitiser->minify(true);`.
