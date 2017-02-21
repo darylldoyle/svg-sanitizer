@@ -118,4 +118,34 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
 
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+    /**
+     * Make sure that external references get sanitized correctly
+     */
+    public function testSanitizeExternal()
+    {
+        $initialData = file_get_contents('tests/data/externalTest.svg');
+        $expected = file_get_contents('tests/data/externalClean.svg');
+
+        $this->class->removeRemoteReferences(true);
+        $cleanData = $this->class->sanitize($initialData);
+        $this->class->removeRemoteReferences(false);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Test that minification of an SVG works
+     */
+    public function testSanitizeAndMinifiySVGDoc()
+    {
+        $initialData = file_get_contents('tests/data/svgTestOne.svg');
+        $expected = file_get_contents('tests/data/svgCleanOneMinified.svg');
+
+        $this->class->minify(true);
+        $cleanData = $this->class->sanitize($initialData);
+        $this->class->minify(false);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }
