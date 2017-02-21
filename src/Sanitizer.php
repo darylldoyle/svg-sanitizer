@@ -264,7 +264,7 @@ class Sanitizer
             // Do we want to strip remote references?
             if($this->removeRemoteReferences) {
                 // Remove attribute if it has a remote reference
-                if ($this->hasRemoteReference($element->attributes->item($x)->value)) {
+                if (isset($element->attributes->item($x)->value) && $this->hasRemoteReference($element->attributes->item($x)->value)) {
                     $element->removeAttribute($attrName);
                 }
             }
