@@ -44,11 +44,11 @@ class AllowedTags implements TagInterface
             'text','textpath','title','tref','tspan','view','vkern',
 
             // SVG Filters
-            'feBlend','feColorMatrix','feComponentTransfer','feComposite',
-            'feConvolveMatrix','feDiffuseLighting','feDisplacementMap',
-            'feFlood','feFuncA','feFuncB','feFuncG','feFuncR','feGaussianBlur',
-            'feMerge','feMergeNode','feMorphology','feOffset',
-            'feSpecularLighting','feTile','feTurbulence',
+            'feblend','fecolormatrix','fecomponenttransfer','fecomposite',
+            'feconvolvematrix','fediffuselighting','fedisplacementmap',
+            'feflood','fefunca','fefuncb','fefuncg','fefuncr','fegaussianblur',
+            'femerge','femergenode','femorphology','feoffset',
+            'fespecularlighting','fetile','feturbulence',
 
             //MathML
             'math','menclose','merror','mfenced','mfrac','mglyph','mi','mlabeledtr',
@@ -56,7 +56,7 @@ class AllowedTags implements TagInterface
             'ms','mpspace','msqrt','mystyle','msub','msup','msubsup','mtable','mtd',
             'mtext','mtr','munder','munderover',
 
-            //Text
+            //text
             '#text'
         );
     }

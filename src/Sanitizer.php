@@ -232,7 +232,7 @@ class Sanitizer
             $currentElement = $elements->item($i);
 
             // If the tag isn't in the whitelist, remove it and continue with next iteration
-            if (!in_array($currentElement->tagName, $this->allowedTags)) {
+            if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
                 $currentElement->parentNode->removeChild($currentElement);
                 continue;
             }
@@ -257,7 +257,7 @@ class Sanitizer
             $attrName = $element->attributes->item($x)->name;
 
             // Remove attribute if not in whitelist
-            if (!in_array($attrName, $this->allowedAttrs)) {
+            if (!in_array(strtolower($attrName), $this->allowedAttrs)) {
                 $element->removeAttribute($attrName);
             }
 
