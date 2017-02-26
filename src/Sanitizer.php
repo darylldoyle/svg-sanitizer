@@ -149,6 +149,9 @@ class Sanitizer
             return '';
         }
 
+        // Strip php tags
+        $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
+
         $this->setUpBefore();
 
         $loaded = $this->xmlDocument->loadXML($dirty);
