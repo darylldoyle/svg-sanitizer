@@ -1,9 +1,3 @@
 /vendor
 /build
-*.idea/
-*.log
-*.bak
-*.DS_Store
-*.orig
-*Thumbs.db
-*aspnet_client/
+/.idea
