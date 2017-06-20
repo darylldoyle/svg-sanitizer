@@ -260,7 +260,7 @@ class Sanitizer
             $attrName = $element->attributes->item($x)->name;
 
             // Remove attribute if not in whitelist
-            if (!in_array(strtolower($attrName), $this->allowedAttrs)) {
+            if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
                 $element->removeAttribute($attrName);
             }
 
@@ -323,5 +323,41 @@ class Sanitizer
     public function minify($shouldMinify = false)
     {
         $this->minifyXML = (bool) $shouldMinify;
+    }
+
+    /**
+     * Check to see if an attribure is an aria attribute or not
+     *
+     * @param $attributeName
+     *
+     * @return bool
+     */
+    protected function isAriaAttribute( $attributeName )
+    {
+        $position = strpos($attributeName, 'aria-');
+
+        if($position === 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check to see if an attribure is an data attribute or not
+     *
+     * @param $attributeName
+     *
+     * @return bool
+     */
+    protected function isDataAttribute( $attributeName )
+    {
+        $position = strpos($attributeName, 'data-');
+
+        if($position === 0) {
+            return true;
+        }
+
+        return false;
     }
 }
