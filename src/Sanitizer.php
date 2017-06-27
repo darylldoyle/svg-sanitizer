@@ -59,6 +59,11 @@ class Sanitizer
     protected $removeRemoteReferences = false;
 
     /**
+     * @var bool
+     */
+    protected $removeXMLTag = false;
+
+    /**
      *
      */
     function __construct()
@@ -171,7 +176,11 @@ class Sanitizer
         $this->startClean($allElements);
 
         // Save cleaned XML to a variable
-        $clean = $this->xmlDocument->saveXML($this->xmlDocument, LIBXML_NOEMPTYTAG);
+        if($this->removeXMLTag) {
+            $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, LIBXML_NOEMPTYTAG);
+        } else {
+            $clean = $this->xmlDocument->saveXML($this->xmlDocument, LIBXML_NOEMPTYTAG);
+        }
 
         $this->resetAfter();
 
@@ -326,7 +335,17 @@ class Sanitizer
     }
 
     /**
-     * Check to see if an attribure is an aria attribute or not
+     * Should we remove the XML tag in the header?
+     *
+     * @param bool $removeXMLTag
+     */
+    public function removeXMLTag ($removeXMLTag = false)
+    {
+        $this->removeXMLTag = (bool) $removeXMLTag;
+    }
+
+    /**
+     * Check to see if an attribute is an aria attribute or not
      *
      * @param $attributeName
      *
@@ -344,7 +363,7 @@ class Sanitizer
     }
 
     /**
-     * Check to see if an attribure is an data attribute or not
+     * Check to see if an attribute is an data attribute or not
      *
      * @param $attributeName
      *
