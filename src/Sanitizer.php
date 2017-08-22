@@ -24,11 +24,6 @@ class Sanitizer
     const SCRIPT_REGEX = '/(?:\w+script|data):/xi';
 
     /**
-     * Regex to test for remote URLs in linked assets
-     */
-    const REMOTE_REFERENCE_REGEX = '/url\(([\'"]?(?:http|https):)[\'"]?([^\'"\)]*)[\'"]?\)/xi';
-
-    /**
      * @var DOMDocument
      */
     protected $xmlDocument;
@@ -310,14 +305,33 @@ class Sanitizer
     }
 
     /**
+     * Removes non-printable ASCII characters from string & trims it
+     *
+     * @param string $value
+     * @return bool
+     */
+    protected function removeNonPrintableCharacters($value)
+    {
+        return trim(preg_replace('/[^ -~]/xu','',$value));
+    }
+
+    /**
      * Does this attribute value have a remote reference?
      *
      * @param $value
      * @return bool
      */
-    protected function hasRemoteReference($value)
-    {
-        if (preg_match(self::REMOTE_REFERENCE_REGEX, $value) === 1) {
+    protected function hasRemoteReference($value){
+        $value = $this->removeNonPrintableCharacters($value);
+
+        $wrapped_in_url = preg_match('~^url\(\s*[\'"]\s*(.*)\s*[\'"]\s*\)$~xi', $value, $match);
+        if (!$wrapped_in_url){
+            return false;
+        }
+
+        $value = trim($match[1], '\'"');
+
+        if (preg_match('~^((https?|ftp|file):)?//~xi', $value)){
             return true;
         }
 

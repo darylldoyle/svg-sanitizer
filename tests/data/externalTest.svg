@@ -3,6 +3,9 @@
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve">
 <rect fill="url('http://example.com/benis.svg')" x="0" y="0" width="1000" height="1000"></rect>
 <rect fill="url('https://example.com/benis.svg')" x="0" y="0" width="1000" height="1000"></rect>
+<rect fill="  url(  ' https://example.com/benis.svg '  ) " x="0" y="0" width="1000" height="1000"></rect>
+<rect fill="url('ftp://192.168.2.1/benis.svg')" x="0" y="0" width="1000" height="1000"></rect>
+<rect fill="url('//example.com/benis.svg')" x="0" y="0" width="1000" height="1000"></rect>
 <rect fill="url('/benis.svg')" x="0" y="0" width="1000" height="1000"></rect>
 <rect fill="url('#benis.svg')" x="0" y="0" width="1000" height="1000"></rect>
 </svg>
