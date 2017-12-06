@@ -294,7 +294,15 @@ class Sanitizer
     {
         $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
         if (preg_match(self::SCRIPT_REGEX, $xlinks) === 1) {
-            $element->removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+            if(! in_array(substr($xlinks, 0, 14), array(
+                'data:image/png', // PNG
+                'data:image/gif', // GIF
+                'data:image/jpg', // JPG
+                'data:image/jpe', // JPEG
+                'data:image/pjp', // PJPEG
+            ))) {
+                $element->removeAttributeNS( 'http://www.w3.org/1999/xlink', 'href' );
+            }
         }
     }
 
