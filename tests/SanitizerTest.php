@@ -163,4 +163,19 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
 
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+    /**
+     * Test that ARIA and Data Attributes are allowed
+     */
+    public function testThatExternalUseElementsAreStripped()
+    {
+        $initialData = file_get_contents('tests/data/useTest.svg');
+        $expected = file_get_contents('tests/data/useClean.svg');
+
+        $this->class->minify(false);
+        $cleanData = $this->class->sanitize($initialData);
+        $this->class->minify(false);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }

@@ -249,6 +249,13 @@ class Sanitizer
             $this->cleanXlinkHrefs($currentElement);
 
             $this->cleanHrefs($currentElement);
+
+            if(strtolower($currentElement->tagName) === 'use') {
+                if($this->isUseTagDirty($currentElement)) {
+                    $currentElement->parentNode->removeChild($currentElement);
+                    continue;
+                }
+            }
         }
     }
 
@@ -388,6 +395,21 @@ class Sanitizer
         $position = strpos($attributeName, 'data-');
 
         if($position === 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Make sure our use tag is only referencing internal resources
+     *
+     * @param \DOMElement $element
+     * @return bool
+     */
+    protected function isUseTagDirty(\DOMElement $element) {
+        $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if ($xlinks && substr($xlinks, 0, 1) !== '#') {
             return true;
         }
 

@@ -41,7 +41,7 @@ class AllowedTags implements TagInterface
             'ellipse','filter','font','g','glyph','glyphref','hkern','image','line',
             'lineargradient','marker','mask','metadata','mpath','path','pattern',
             'polygon','polyline','radialgradient','rect','stop','switch','symbol',
-            'text','textpath','title','tref','tspan','view','vkern',
+            'text','textpath','title','tref','tspan','view','vkern', 'use',
 
             // SVG Filters
             'feblend','fecolormatrix','fecomponenttransfer','fecomposite',
