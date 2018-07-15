@@ -179,6 +179,9 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
+    /**
+     * Test setXMLOptions and minifying works as expected
+     */
     public function testMinifiedOptions()
     {
         $this->class->minify(true);
