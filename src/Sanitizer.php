@@ -1,8 +1,6 @@
 <?php
 
-
 namespace enshrined\svgSanitize;
-
 
 use DOMDocument;
 use enshrined\svgSanitize\data\AllowedAttributes;
@@ -59,12 +57,15 @@ class Sanitizer
     protected $removeXMLTag = false;
 
     /**
+     * @var int
+     */
+    protected $xmlOptions = LIBXML_NOEMPTYTAG;
+
+    /**
      *
      */
     function __construct()
     {
-        $this->resetInternal();
-
         // Load default tags/attributes
         $this->allowedAttrs = AllowedAttributes::getAttributes();
         $this->allowedTags = AllowedTags::getTags();
@@ -78,12 +79,29 @@ class Sanitizer
         $this->xmlDocument = new DOMDocument();
         $this->xmlDocument->preserveWhiteSpace = false;
         $this->xmlDocument->strictErrorChecking = false;
-        $this->xmlDocument->formatOutput = true;
+        $this->xmlDocument->formatOutput = !$this->minifyXML;
+    }
 
-        // Maybe don't format the output
-        if($this->minifyXML) {
-            $this->xmlDocument->formatOutput = false;
-        }
+    /**
+     * Set XML options to use when saving XML
+     * See: DOMDocument::saveXML
+     * 
+     * @param int  $xmlOptions
+     */
+    public function setXMLOptions($xmlOptions)
+    {
+        $this->xmlOptions = $xmlOptions;
+    }
+
+     /**
+     * Get XML options to use when saving XML
+     * See: DOMDocument::saveXML
+     * 
+     * @return int
+     */
+    public function getXMLOptions()
+    {
+       return $this->xmlOptions;
     }
 
     /**
@@ -152,6 +170,7 @@ class Sanitizer
         // Strip php tags
         $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
 
+        $this->resetInternal();
         $this->setUpBefore();
 
         $loaded = $this->xmlDocument->loadXML($dirty);
@@ -171,16 +190,16 @@ class Sanitizer
         $this->startClean($allElements);
 
         // Save cleaned XML to a variable
-        if($this->removeXMLTag) {
-            $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, LIBXML_NOEMPTYTAG);
+        if ($this->removeXMLTag) {
+            $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, $this->xmlOptions);
         } else {
-            $clean = $this->xmlDocument->saveXML($this->xmlDocument, LIBXML_NOEMPTYTAG);
+            $clean = $this->xmlDocument->saveXML($this->xmlDocument, $this->xmlOptions);
         }
 
         $this->resetAfter();
 
         // Remove any extra whitespaces when minifying
-        if($this->minifyXML) {
+        if ($this->minifyXML) {
             $clean = preg_replace('/\s+/', ' ', $clean);
         }
 
@@ -205,10 +224,7 @@ class Sanitizer
      */
     protected function resetAfter()
     {
-        // Reset DOMDocument to a clean state in case we use it again
-        $this->resetInternal();
-
-        // Reset the entity loader3
+        // Reset the entity loader
         libxml_disable_entity_loader($this->xmlLoaderValue);
     }
 
@@ -250,8 +266,8 @@ class Sanitizer
 
             $this->cleanHrefs($currentElement);
 
-            if(strtolower($currentElement->tagName) === 'use') {
-                if($this->isUseTagDirty($currentElement)) {
+            if (strtolower($currentElement->tagName) === 'use') {
+                if ($this->isUseTagDirty($currentElement)) {
                     $currentElement->parentNode->removeChild($currentElement);
                     continue;
                 }
@@ -290,11 +306,11 @@ class Sanitizer
      *
      * @param \DOMElement $element
      */
-    protected function cleanXlinkHrefs(\DOMElement &$element)
+    protected function cleanXlinkHrefs(\DOMElement $element)
     {
         $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
         if (preg_match(self::SCRIPT_REGEX, $xlinks) === 1) {
-            if(! in_array(substr($xlinks, 0, 14), array(
+            if (!in_array(substr($xlinks, 0, 14), array(
                 'data:image/png', // PNG
                 'data:image/gif', // GIF
                 'data:image/jpg', // JPG
@@ -311,7 +327,7 @@ class Sanitizer
      *
      * @param \DOMElement $element
      */
-    protected function cleanHrefs(\DOMElement &$element)
+    protected function cleanHrefs(\DOMElement $element)
     {
         $href = $element->getAttribute('href');
         if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
@@ -336,7 +352,8 @@ class Sanitizer
      * @param $value
      * @return bool
      */
-    protected function hasRemoteReference($value){
+    protected function hasRemoteReference($value)
+    {
         $value = $this->removeNonPrintableCharacters($value);
 
         $wrapped_in_url = preg_match('~^url\(\s*[\'"]\s*(.*)\s*[\'"]\s*\)$~xi', $value, $match);
@@ -346,11 +363,7 @@ class Sanitizer
 
         $value = trim($match[1], '\'"');
 
-        if (preg_match('~^((https?|ftp|file):)?//~xi', $value)){
-            return true;
-        }
-
-        return false;
+        return preg_match('~^((https?|ftp|file):)?//~xi', $value);
     }
 
     /**
@@ -368,7 +381,7 @@ class Sanitizer
      *
      * @param bool $removeXMLTag
      */
-    public function removeXMLTag ($removeXMLTag = false)
+    public function removeXMLTag($removeXMLTag = false)
     {
         $this->removeXMLTag = (bool) $removeXMLTag;
     }
@@ -380,15 +393,9 @@ class Sanitizer
      *
      * @return bool
      */
-    protected function isAriaAttribute( $attributeName )
+    protected function isAriaAttribute($attributeName)
     {
-        $position = strpos($attributeName, 'aria-');
-
-        if($position === 0) {
-            return true;
-        }
-
-        return false;
+        return strpos($attributeName, 'aria-') === 0;
     }
 
     /**
@@ -398,15 +405,9 @@ class Sanitizer
      *
      * @return bool
      */
-    protected function isDataAttribute( $attributeName )
+    protected function isDataAttribute($attributeName)
     {
-        $position = strpos($attributeName, 'data-');
-
-        if($position === 0) {
-            return true;
-        }
-
-        return false;
+        return strpos($attributeName, 'data-') === 0;
     }
 
     /**
@@ -415,7 +416,8 @@ class Sanitizer
      * @param \DOMElement $element
      * @return bool
      */
-    protected function isUseTagDirty(\DOMElement $element) {
+    protected function isUseTagDirty(\DOMElement $element)
+    {
         $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
         if ($xlinks && substr($xlinks, 0, 1) !== '#') {
             return true;

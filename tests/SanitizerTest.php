@@ -178,4 +178,18 @@ class SanitizerTest extends PHPUnit_Framework_TestCase
 
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+    /**
+     * Test setXMLOptions and minifying works as expected
+     */
+    public function testMinifiedOptions()
+    {
+        $this->class->minify(true);
+        $this->class->removeXMLTag(true);
+        $this->class->setXMLOptions(0);
+
+        $input = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><title>chevron-double-down</title><path d="M4 11.73l.68-.73L12 17.82 19.32 11l.68.73-7.66 7.13a.5.5 0 0 1-.68 0z"/><path d="M4 5.73L4.68 5 12 11.82 19.32 5l.68.73-7.66 7.13a.5.5 0 0 1-.68 0z"/></svg>';
+        $output = $this->class->sanitize($input);
+        $this->assertEquals($input, $output);
+    }
 }
