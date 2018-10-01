@@ -3,11 +3,12 @@ require 'data/TestAllowedTags.php';
 require 'data/TestAllowedAttributes.php';
 
 use \enshrined\svgSanitize\Sanitizer;
+use PHPUnit\Framework\TestCase;
 
 /**
  * Class SanitizerTest
  */
-class SanitizerTest extends PHPUnit_Framework_TestCase
+class SanitizerTest extends TestCase
 {
     /**
      * @var Sanitizer

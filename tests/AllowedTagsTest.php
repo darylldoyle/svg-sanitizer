@@ -1,11 +1,12 @@
 <?php
 
 use \enshrined\svgSanitize\data\AllowedTags;
+use PHPUnit\Framework\TestCase;
 
 /**
  * Class AllowedTagsTest
  */
-class AllowedTagsTest extends PHPUnit_Framework_TestCase
+class AllowedTagsTest extends TestCase
 {
 
     /**
