@@ -67,8 +67,8 @@ class Sanitizer
     function __construct()
     {
         // Load default tags/attributes
-        $this->allowedAttrs = AllowedAttributes::getAttributes();
-        $this->allowedTags = AllowedTags::getTags();
+        $this->allowedAttrs = array_map('strtolower', AllowedAttributes::getAttributes());
+        $this->allowedTags = array_map('strtolower', AllowedTags::getTags());
     }
 
     /**
@@ -121,7 +121,7 @@ class Sanitizer
      */
     public function setAllowedTags(TagInterface $allowedTags)
     {
-        $this->allowedTags = $allowedTags::getTags();
+        $this->allowedTags = array_map('strtolower', $allowedTags::getTags());
     }
 
     /**
@@ -141,7 +141,7 @@ class Sanitizer
      */
     public function setAllowedAttrs(AttributeInterface $allowedAttrs)
     {
-        $this->allowedAttrs = $allowedAttrs::getAttributes();
+        $this->allowedAttrs = array_map('strtolower', $allowedAttrs::getAttributes());
     }
 
     /**
