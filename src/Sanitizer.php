@@ -352,7 +352,7 @@ class Sanitizer
             ))) {
                 $element->removeAttributeNS( 'http://www.w3.org/1999/xlink', 'href' );
                 $this->xmlIssues[] = array(
-                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                    'message' => 'Suspicious attribute \'href\'',
                     'line' => $element->getLineNo(),
 		);
 
