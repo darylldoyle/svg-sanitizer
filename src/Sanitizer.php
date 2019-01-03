@@ -372,7 +372,7 @@ class Sanitizer
         if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
             $element->removeAttribute('href');
             $this->xmlIssues[] = array(
-                'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                'message' => 'Suspicious attribute \'href\'',
                 'line' => $element->getLineNo(),
             );
         }
