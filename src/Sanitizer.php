@@ -62,6 +62,11 @@ class Sanitizer
     protected $xmlOptions = LIBXML_NOEMPTYTAG;
 
     /**
+     * @var array
+     */
+    protected $xmlIssues = array();
+
+    /**
      *
      */
     function __construct()
@@ -155,6 +160,14 @@ class Sanitizer
     }
 
     /**
+     * Get 
+     */
+    public function getXmlIssues() {
+         return $this->xmlIssues;
+    }
+
+
+    /**
      * Sanitize the passed string
      *
      * @param string $dirty
@@ -217,6 +230,9 @@ class Sanitizer
 
         // Suppress the errors because we don't really have to worry about formation before cleansing
         libxml_use_internal_errors(true);
+ 
+        // Reset array of altered XML
+        $this->xmlIssues = array();
     }
 
     /**
@@ -257,6 +273,10 @@ class Sanitizer
             // If the tag isn't in the whitelist, remove it and continue with next iteration
             if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
                 $currentElement->parentNode->removeChild($currentElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
+                    'line' => $currentElement->getLineNo(),
+		);
                 continue;
             }
 
@@ -269,6 +289,10 @@ class Sanitizer
             if (strtolower($currentElement->tagName) === 'use') {
                 if ($this->isUseTagDirty($currentElement)) {
                     $currentElement->parentNode->removeChild($currentElement);
+                    $this->xmlIssues[] = array(
+                        'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
+			'line' => $currentElement->getLineNo(),
+                    );
                     continue;
                 }
             }
@@ -288,7 +312,12 @@ class Sanitizer
 
             // Remove attribute if not in whitelist
             if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
+
                 $element->removeAttribute($attrName);
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                    'line' => $element->getLineNo(),
+		);
             }
 
             // Do we want to strip remote references?
@@ -296,6 +325,10 @@ class Sanitizer
                 // Remove attribute if it has a remote reference
                 if (isset($element->attributes->item($x)->value) && $this->hasRemoteReference($element->attributes->item($x)->value)) {
                     $element->removeAttribute($attrName);
+                    $this->xmlIssues[] = array(
+                        'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                        'line' => $element->getLineNo(),
+		    );
                 }
             }
         }
@@ -318,7 +351,13 @@ class Sanitizer
                 'data:image/pjp', // PJPEG
             ))) {
                 $element->removeAttributeNS( 'http://www.w3.org/1999/xlink', 'href' );
-            }
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious attribute \'href\'',
+                    'line' => $element->getLineNo(),
+		);
+
+
+           }
         }
     }
 
@@ -332,6 +371,10 @@ class Sanitizer
         $href = $element->getAttribute('href');
         if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
             $element->removeAttribute('href');
+            $this->xmlIssues[] = array(
+                'message' => 'Suspicious attribute \'href\'',
+                'line' => $element->getLineNo(),
+            );
         }
     }
 
