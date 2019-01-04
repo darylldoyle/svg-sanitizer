@@ -13,34 +13,6 @@ require_once( __DIR__ . '/src/data/AllowedAttributes.php' );
 require_once( __DIR__ . '/src/data/AllowedTags.php' );
 require_once( __DIR__ . '/src/Sanitizer.php' );
 
-/*
- * We need to allow certain extra attributes, so
- * extend the AllowedAttributes class to enable that.
- */
-class AllowedAttributesCustom extends enshrined\svgSanitize\data\AllowedAttributes {
-	public static function getAttributes() {
-		$default_allowed_attributes =
-			parent::getAttributes();
-
-		return array_merge(
-			array(
-				// The extra attributes allowable
-				'version',
-				'enable-background',
-				'cy',
-				'cx',
-				'rx',
-				'ry',
-				'fill',
-				'y',
-				'x',
-				'space',
-			),
-			$default_allowed_attributes
-		);
-	}
-}
-
 
 /*
  * Print array as JSON and then
@@ -115,10 +87,6 @@ if ( empty( $files_to_scan ) ) {
  * and to remove remote references.
  */
 $sanitizer = new enshrined\svgSanitize\Sanitizer();
-
-$sanitizer->setAllowedAttrs(
-	new AllowedAttributesCustom()
-);
 
 $sanitizer->removeRemoteReferences( true );
 
