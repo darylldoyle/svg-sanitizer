@@ -139,9 +139,14 @@ foreach( $files_to_scan as $file_name ) {
 	if ( false === $svg_file ) {
 		$results['totals']['errors']++;
 
-		$results[ 'files' ][ $file_name ][] = array(
-			'status' => false,
-			'issues' => 'File specified could not be read (' . $file_name . ')',
+		$results['files'][ $file_name ][] = array(
+			'errors' => 1,
+			'messages' => array(
+				array(
+					'message' => 'File specified could not be read (' . $file_name . ')',
+					'line' => null,
+				),
+			),
 		);
 
 		continue;
@@ -161,6 +166,26 @@ foreach( $files_to_scan as $file_name ) {
 		$results['files'][ $file_name ] = array(
 			'errors' => 0,
 			'messages' => array()
+		);
+	}
+
+	/*
+	 * Could not sanitize the file.
+	 */
+	else if (
+		( '' === $sanitize_status ) ||
+		( false === $sanitize_status )
+	) {
+		$results['totals']['errors']++;
+
+		$results['files'][ $file_name ] = array(
+			'errors' => 1,
+			'messages' => array(
+				array(
+					'message' => 'Unable to sanitize file \'' . $file_name . '\'' ,
+					'line' => null,
+				)
+			),
 		);
 	}
 
