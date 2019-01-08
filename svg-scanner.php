@@ -75,6 +75,8 @@ global $argv;
 $results = array(
 	'totals' => array(
 		'errors' => 0,
+		'warnings' => 0,
+		'fixable' => 0,
 	),
 
 	'files' => array(
