@@ -160,7 +160,9 @@ class Sanitizer
     }
 
     /**
-     * Get 
+     * Get XML issues.
+     *
+     * @return array
      */
     public function getXmlIssues() {
          return $this->xmlIssues;
