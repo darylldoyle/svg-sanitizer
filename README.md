@@ -48,6 +48,14 @@ This defaults to false, set to true to remove references.
 
 `$sanitizer->removeRemoteReferences(true);`
 
+## Viewing Sanitisation Issues
+
+You may use the `getXmlIssues()` method to return an array of issues that occurred during sanitisation.
+
+This may be useful for logging or providing feedback to the user on why an SVG was refused.
+
+`$issues = $sanitizer->getXmlIssues();`
+
 ## Minification
 
 You can minify the XML output by calling `$sanitiser->minify(true);`.
@@ -66,6 +74,14 @@ I've just released a WordPress plugin containing this code so you can sanitize y
 ## Tests
 
 You can run these by running `phpunit`
+
+## Standalone scanning of files via CLI
+
+Thanks to the work by [gudmdharalds](https://github.com/gudmdharalds) there's now a standalone scanner that can be used via the CLI.
+
+Any errors will be output in JSON format. See [the PR](https://github.com/darylldoyle/svg-sanitizer/pull/25) for an example.
+
+Use it as follows: `php svg-scanner.php ~/svgs/myfile.svg`
 
 ## To-Do
 
