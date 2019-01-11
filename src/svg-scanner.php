@@ -8,11 +8,11 @@
  * the issues found on exit.
  */
 
-require_once( __DIR__ . '/src/data/AttributeInterface.php' );
-require_once( __DIR__ . '/src/data/TagInterface.php' );
-require_once( __DIR__ . '/src/data/AllowedAttributes.php' );
-require_once( __DIR__ . '/src/data/AllowedTags.php' );
-require_once( __DIR__ . '/src/Sanitizer.php' );
+require_once( __DIR__ . '/data/AttributeInterface.php' );
+require_once( __DIR__ . '/data/TagInterface.php' );
+require_once( __DIR__ . '/data/AllowedAttributes.php' );
+require_once( __DIR__ . '/data/AllowedTags.php' );
+require_once( __DIR__ . '/Sanitizer.php' );
 
 
 /*
