@@ -53,7 +53,8 @@ class SanitizerTest extends TestCase
         $tags = $this->class->getAllowedTags();
 
         $this->assertInternalType('array', $tags);
-        $this->assertEquals(TestAllowedTags::getTags(), $tags);
+
+        $this->assertEquals(array_map('strtolower', TestAllowedTags::getTags()), $tags);
     }
 
     /**
@@ -66,7 +67,8 @@ class SanitizerTest extends TestCase
         $attributes = $this->class->getAllowedAttrs();
 
         $this->assertInternalType('array', $attributes);
-        $this->assertEquals(TestAllowedAttributes::getAttributes(), $attributes);
+
+        $this->assertEquals( array_map('strtolower', TestAllowedAttributes::getAttributes()), $attributes);
     }
 
     /**
