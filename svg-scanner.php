@@ -36,6 +36,7 @@ class AllowedAttributesCustom extends enshrined\svgSanitize\data\AllowedAttribut
 				'y',
 				'x',
 				'space',
+				'vector-effect',
 			),
 			$default_allowed_attributes
 		);
