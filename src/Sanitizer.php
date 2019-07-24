@@ -273,7 +273,7 @@ class Sanitizer
             $currentElement = $elements->item($i);
 
             // If the tag isn't in the whitelist, remove it and continue with next iteration
-            if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
+            if (!in_array(strtolower($currentElement->localName), $this->allowedTags)) {
                 $currentElement->parentNode->removeChild($currentElement);
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
@@ -288,7 +288,7 @@ class Sanitizer
 
             $this->cleanHrefs($currentElement);
 
-            if (strtolower($currentElement->tagName) === 'use') {
+            if (strtolower($currentElement->localName) === 'use') {
                 if ($this->isUseTagDirty($currentElement)) {
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
