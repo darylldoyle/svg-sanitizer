@@ -351,6 +351,11 @@ class AllowedAttributes implements AttributeInterface
             'xlink:title',
             'xml:space',
             'xmlns:xlink',
+
+            // RDF
+            'about',
+            'resource',
+
         );
     }
 }
