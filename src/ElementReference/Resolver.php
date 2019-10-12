@@ -45,6 +45,9 @@ class Resolver
         );
     }
 
+    /**
+     * Collects elements having `id` attribute (those that can be referenced).
+     */
     protected function collectIdentifiedElements()
     {
         /** @var \DOMNodeList|\DOMElement[] $elements */
@@ -54,6 +57,10 @@ class Resolver
         }
     }
 
+    /**
+     * Processes references from and to elements having `id` attribute concerning
+     * their occurrence in `<use ... xlink:href="#identifier">` statements.
+     */
     protected function processReferences()
     {
         $useNodeName = $this->xPath->createNodeName('use');
