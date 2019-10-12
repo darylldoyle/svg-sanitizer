@@ -2,7 +2,6 @@
 
 namespace enshrined\svgSanitize;
 
-use DOMDocument;
 use enshrined\svgSanitize\data\AllowedAttributes;
 use enshrined\svgSanitize\data\AllowedTags;
 use enshrined\svgSanitize\data\AttributeInterface;
@@ -22,7 +21,7 @@ class Sanitizer
     const SCRIPT_REGEX = '/(?:\w+script|data):/xi';
 
     /**
-     * @var DOMDocument
+     * @var \DOMDocument
      */
     protected $xmlDocument;
 
@@ -81,7 +80,7 @@ class Sanitizer
      */
     protected function resetInternal()
     {
-        $this->xmlDocument = new DOMDocument();
+        $this->xmlDocument = new \DOMDocument();
         $this->xmlDocument->preserveWhiteSpace = false;
         $this->xmlDocument->strictErrorChecking = false;
         $this->xmlDocument->formatOutput = !$this->minifyXML;
@@ -270,6 +269,7 @@ class Sanitizer
         // we do this backwards so we don't skip anything if we delete a node
         // see comments at: http://php.net/manual/en/class.domnamednodemap.php
         for ($i = $elements->length - 1; $i >= 0; $i--) {
+            /** @var \DOMElement $currentElement */
             $currentElement = $elements->item($i);
 
             // If the tag isn't in the whitelist, remove it and continue with next iteration
@@ -278,7 +278,7 @@ class Sanitizer
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
                     'line' => $currentElement->getLineNo(),
-		);
+		        );
                 continue;
             }
 
@@ -293,7 +293,7 @@ class Sanitizer
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
-			'line' => $currentElement->getLineNo(),
+            			'line' => $currentElement->getLineNo(),
                     );
                     continue;
                 }
