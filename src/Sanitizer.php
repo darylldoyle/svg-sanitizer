@@ -101,7 +101,7 @@ class Sanitizer
     /**
      * Set XML options to use when saving XML
      * See: DOMDocument::saveXML
-     * 
+     *
      * @param int  $xmlOptions
      */
     public function setXMLOptions($xmlOptions)
@@ -109,15 +109,15 @@ class Sanitizer
         $this->xmlOptions = $xmlOptions;
     }
 
-     /**
+    /**
      * Get XML options to use when saving XML
      * See: DOMDocument::saveXML
-     * 
+     *
      * @return int
      */
     public function getXMLOptions()
     {
-       return $this->xmlOptions;
+        return $this->xmlOptions;
     }
 
     /**
@@ -176,7 +176,7 @@ class Sanitizer
      * @return array
      */
     public function getXmlIssues() {
-         return $this->xmlIssues;
+        return $this->xmlIssues;
     }
 
 
@@ -247,7 +247,7 @@ class Sanitizer
 
         // Suppress the errors because we don't really have to worry about formation before cleansing
         libxml_use_internal_errors(true);
- 
+
         // Reset array of altered XML
         $this->xmlIssues = array();
     }
@@ -294,7 +294,7 @@ class Sanitizer
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
                     'line' => $currentElement->getLineNo(),
-		        );
+                );
                 continue;
             }
 
@@ -311,7 +311,7 @@ class Sanitizer
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
-            			'line' => $currentElement->getLineNo(),
+                        'line' => $currentElement->getLineNo(),
                     );
                     continue;
                 }
@@ -337,7 +337,7 @@ class Sanitizer
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious attribute \'' . $attrName . '\'',
                     'line' => $element->getLineNo(),
-		);
+                );
             }
 
             // Do we want to strip remote references?
@@ -348,7 +348,7 @@ class Sanitizer
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',
                         'line' => $element->getLineNo(),
-		    );
+                    );
                 }
             }
         }
@@ -374,10 +374,10 @@ class Sanitizer
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious attribute \'href\'',
                     'line' => $element->getLineNo(),
-		);
+                );
 
 
-           }
+            }
         }
     }
 
