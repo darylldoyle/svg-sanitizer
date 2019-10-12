@@ -6,6 +6,8 @@ use enshrined\svgSanitize\data\AllowedAttributes;
 use enshrined\svgSanitize\data\AllowedTags;
 use enshrined\svgSanitize\data\AttributeInterface;
 use enshrined\svgSanitize\data\TagInterface;
+use enshrined\svgSanitize\data\XPath;
+use enshrined\svgSanitize\ElementReference\Resolver;
 
 /**
  * Class Sanitizer
@@ -51,6 +53,11 @@ class Sanitizer
     protected $removeRemoteReferences = false;
 
     /**
+     * @var int
+     */
+    protected $useThreshold = 1000;
+
+    /**
      * @var bool
      */
     protected $removeXMLTag = false;
@@ -64,6 +71,11 @@ class Sanitizer
      * @var array
      */
     protected $xmlIssues = array();
+
+    /**
+     * @var Resolver
+     */
+    protected $elementReferenceResolver;
 
     /**
      *
@@ -197,6 +209,10 @@ class Sanitizer
 
         $this->removeDoctype();
 
+        // Pre-process all identified elements
+        $xPath = new XPath($this->xmlDocument);
+        $this->elementReferenceResolver = new Resolver($xPath);
+        $this->elementReferenceResolver->collect();
         // Grab all the elements
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
@@ -289,7 +305,9 @@ class Sanitizer
             $this->cleanHrefs($currentElement);
 
             if (strtolower($currentElement->tagName) === 'use') {
-                if ($this->isUseTagDirty($currentElement)) {
+                if ($this->isUseTagDirty($currentElement)
+                    || $this->isUseTagExceedingThreshold($currentElement)
+                ) {
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
@@ -432,6 +450,17 @@ class Sanitizer
     }
 
     /**
+     * Whether `<use ... xlink:href="#identifier">` elements shall be
+     * removed in case expansion would exceed this threshold.
+     *
+     * @param int $useThreshold
+     */
+    public function useThreshold($useThreshold = 1000)
+    {
+        $this->useThreshold = (int)$useThreshold;
+    }
+
+    /**
      * Check to see if an attribute is an aria attribute or not
      *
      * @param $attributeName
@@ -463,11 +492,34 @@ class Sanitizer
      */
     protected function isUseTagDirty(\DOMElement $element)
     {
-        $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
-        if ($xlinks && substr($xlinks, 0, 1) !== '#') {
-            return true;
-        }
+        $href = Helper::getElementHref($element);
+        return $href && strpos($href, '#') !== 0;
+    }
 
+    /**
+     * Determines whether `<use ... xlink:href="#identifier">` is expanded
+     * recursively in order to create DoS scenarios. The amount of a actually
+     * used element needs to be below `$this->useThreshold`.
+     *
+     * @param \DOMElement $element
+     * @return bool
+     */
+    protected function isUseTagExceedingThreshold(\DOMElement $element)
+    {
+        if ($this->useThreshold <= 0) {
+            return false;
+        }
+        $useId = Helper::extractIdReferenceFromHref(
+            Helper::getElementHref($element)
+        );
+        if ($useId === null) {
+            return false;
+        }
+        foreach ($this->elementReferenceResolver->findByElementId($useId) as $subject) {
+            if ($subject->countUse() >= $this->useThreshold) {
+                return true;
+            }
+        }
         return false;
     }
 }

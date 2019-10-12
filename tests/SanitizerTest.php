@@ -208,4 +208,20 @@ class SanitizerTest extends TestCase
         $output = $this->class->sanitize($input);
         $this->assertEquals($input, $output);
     }
+
+    /**
+     *
+     */
+    public function testUseRecursionDetection()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/xlinkLaughsTest.svg');
+        $expected = file_get_contents($dataDirectory . '/xlinkLaughsClean.svg');
+
+        $this->class->minify(false);
+        $cleanData = $this->class->sanitize($initialData);
+        $this->class->minify(false);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }
