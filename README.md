@@ -71,6 +71,10 @@ I've just released a WordPress plugin containing this code so you can sanitize y
 
 [Michael Potter](https://github.com/heyMP) has kindly created a Drupal module for this library which is available at: [https://www.drupal.org/project/svg_sanitizer](https://www.drupal.org/project/svg_sanitizer)
 
+## TYPO3
+
+An integration for TYPO3 CMS of this library is available as composer package `t3g/svg-sanitizer` at [https://bitbucket.typo3.com/projects/EXT/repos/svg_sanitizer/](https://bitbucket.typo3.com/projects/EXT/repos/svg_sanitizer/)
+
 ## Tests
 
 You can run these by running `phpunit`
