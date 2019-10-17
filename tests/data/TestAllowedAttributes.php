@@ -1,18 +1,19 @@
 <?php
 
-
-class TestAllowedAttributes implements \enshrined\svgSanitize\data\AttributeInterface
-{
-
-    /**
-     * Returns an array of attributes
-     *
-     * @return array
-     */
-    public static function getAttributes()
+if (!class_exists('TestAllowedAttributes')) {
+    class TestAllowedAttributes implements \enshrined\svgSanitize\data\AttributeInterface
     {
-        return array(
-            'testAttribute',
-        );
+
+        /**
+         * Returns an array of attributes
+         *
+         * @return array
+         */
+        public static function getAttributes()
+        {
+            return array(
+                'testAttribute',
+            );
+        }
     }
 }

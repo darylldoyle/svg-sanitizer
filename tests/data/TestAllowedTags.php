@@ -1,18 +1,19 @@
 <?php
 
-
-class TestAllowedTags implements enshrined\svgSanitize\data\TagInterface
-{
-
-    /**
-     * Returns an array of tags
-     *
-     * @return array
-     */
-    public static function getTags()
+if (!class_exists('TestAllowedTags')) {
+    class TestAllowedTags implements enshrined\svgSanitize\data\TagInterface
     {
-        return array(
-            'testTag',
-        );
+
+        /**
+         * Returns an array of tags
+         *
+         * @return array
+         */
+        public static function getTags()
+        {
+            return array(
+                'testTag',
+            );
+        }
     }
 }
