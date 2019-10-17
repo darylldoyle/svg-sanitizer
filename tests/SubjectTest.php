@@ -1,6 +1,6 @@
 <?php
-require 'data/TestAllowedTags.php';
-require 'data/TestAllowedAttributes.php';
+require_once 'data/TestAllowedTags.php';
+require_once 'data/TestAllowedAttributes.php';
 
 use enshrined\svgSanitize\ElementReference\Subject;
 use PHPUnit\Framework\TestCase;
