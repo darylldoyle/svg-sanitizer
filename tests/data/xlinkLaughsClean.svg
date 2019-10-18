@@ -1,5 +1,5 @@
 <?xml version="1.0" standalone="no"?>
-<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" x="0px" y="0px" width="512" height="512">
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="512" height="512">
  <defs>
     <g id="a0">
       <circle stroke="#000000" fill="#ffffff" fill-opacity="0.1" r="10"/>
@@ -47,100 +47,23 @@
 </g>
 </defs>
 <defs>
-<g id="a4">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a4" />
 </defs>
 <defs>
-<g id="a5">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a5" />
 </defs>
 <defs>
-<g id="a6">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a6" />
 </defs>
 <defs>
-<g id="a7">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a7" />
 </defs>
 <defs>
-<g id="a8">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a8" />
 </defs>
 <defs>
-<g id="a9">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a9" />
 </defs>
 <defs>
-<g id="a10">
-
-
-
-
-
-
-
-
-
-
-</g>
+<g id="a10" />
 </defs></svg>
