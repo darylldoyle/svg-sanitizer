@@ -1,6 +1,7 @@
 <?php
+namespace enshrined\svgSanitize\Tests;
 
-use \enshrined\svgSanitize\data\AllowedAttributes;
+use enshrined\svgSanitize\data\AllowedAttributes;
 use PHPUnit\Framework\TestCase;
 
 /**

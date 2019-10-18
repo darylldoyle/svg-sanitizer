@@ -1,4 +1,6 @@
 <?php
+namespace enshrined\svgSanitize\Tests;
+
 use enshrined\svgSanitize\ElementReference\Subject;
 use PHPUnit\Framework\TestCase;
 
@@ -16,7 +18,7 @@ class SubjectTest extends TestCase
      */
     public function oneLevelCountsUseIsCorrect()
     {
-        $first = new DOMElement('first');
+        $first = new \DOMElement('first');
         $firstSubject = new Subject($first);
         self::assertSame(0, $firstSubject->countUse(false));
         self::assertSame(0, $firstSubject->countUse(true));
@@ -32,8 +34,8 @@ class SubjectTest extends TestCase
      */
     public function twoLevelsCountUseIsCorrect()
     {
-        $first = new DOMElement('first');
-        $second = new DOMElement('second');
+        $first = new \DOMElement('first');
+        $second = new \DOMElement('second');
         $firstSubject = new Subject($first);
         $secondSubject = new Subject($second);
         $firstSubject->addUse($secondSubject);
@@ -60,9 +62,9 @@ class SubjectTest extends TestCase
      */
     public function threeLevelsCountUseIsCorrect()
     {
-        $first = new DOMElement('first');
-        $second = new DOMElement('second');
-        $third = new DOMElement('third');
+        $first = new \DOMElement('first');
+        $second = new \DOMElement('second');
+        $third = new \DOMElement('third');
         $firstSubject = new Subject($first);
         $secondSubject = new Subject($second);
         $thirdSubject = new Subject($third);
@@ -83,7 +85,7 @@ class SubjectTest extends TestCase
      */
     public function oneLevelCountsUsedInIsCorrect()
     {
-        $first = new DOMElement('first');
+        $first = new \DOMElement('first');
         $firstSubject = new Subject($first);
         self::assertSame(0, $firstSubject->countUsedIn());
     }
@@ -98,8 +100,8 @@ class SubjectTest extends TestCase
      */
     public function twoLevelsCountUsedInIsCorrect()
     {
-        $first = new DOMElement('first');
-        $second = new DOMElement('second');
+        $first = new \DOMElement('first');
+        $second = new \DOMElement('second');
         $firstSubject = new Subject($first);
         $secondSubject = new Subject($second);
         $secondSubject->addUsedIn($firstSubject);
@@ -125,9 +127,9 @@ class SubjectTest extends TestCase
      */
     public function threeLevelsCountUsedInIsCorrect()
     {
-        $first = new DOMElement('first');
-        $second = new DOMElement('second');
-        $third = new DOMElement('third');
+        $first = new \DOMElement('first');
+        $second = new \DOMElement('second');
+        $third = new \DOMElement('third');
         $firstSubject = new Subject($first);
         $secondSubject = new Subject($second);
         $thirdSubject = new Subject($third);

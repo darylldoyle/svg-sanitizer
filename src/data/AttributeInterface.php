@@ -1,6 +1,4 @@
 <?php
-
-
 namespace enshrined\svgSanitize\data;
 
 

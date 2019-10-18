@@ -1,8 +1,5 @@
 <?php
-
-
 namespace enshrined\svgSanitize\data;
-
 
 /**
  * Interface TagInterface

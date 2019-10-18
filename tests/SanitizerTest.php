@@ -1,8 +1,9 @@
 <?php
-require_once 'data/TestAllowedTags.php';
-require_once 'data/TestAllowedAttributes.php';
+namespace enshrined\svgSanitize\Tests;
 
-use \enshrined\svgSanitize\Sanitizer;
+use enshrined\svgSanitize\Sanitizer;
+use enshrined\svgSanitize\Tests\Fixtures\TestAllowedAttributes;
+use enshrined\svgSanitize\Tests\Fixtures\TestAllowedTags;
 use PHPUnit\Framework\TestCase;
 
 /**

@@ -77,7 +77,7 @@ An integration for TYPO3 CMS of this library is available as composer package `t
 
 ## Tests
 
-You can run these by running `phpunit`
+You can run these by running `vendor/bin/phpunit` from the base directory of this package.
 
 ## Standalone scanning of files via CLI
 

@@ -13,6 +13,11 @@
             "enshrined\\svgSanitize\\": "src"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "enshrined\\svgSanitize\\Tests\\": "tests"
+        }
+    },
     "minimum-stability": "stable",
     "require": {
         "ext-dom": "*",
