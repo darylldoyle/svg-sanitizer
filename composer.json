@@ -1,7 +1,7 @@
 {
     "name": "enshrined/svg-sanitize",
     "description": "An SVG sanitizer for PHP",
-    "license": "GPL-2.0+",
+    "license": "GPL-2.0-or-later",
     "authors": [
         {
             "name": "Daryll Doyle",
