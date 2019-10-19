@@ -28,7 +28,7 @@ class Resolver
     }
 
     /**
-     * Resolves elements (plural!) by element id - in theory malformed
+     * Resolves subjects (plural!) by element id - in theory malformed
      * DOM might have same ids assigned to different elements and leaving
      * it to client/browser implementation which element to actually use.
      *
@@ -64,22 +64,21 @@ class Resolver
     protected function processReferences()
     {
         $useNodeName = $this->xPath->createNodeName('use');
-        foreach ($this->subjects as $elementReference) {
+        foreach ($this->subjects as $subject) {
             $useElements = $this->xPath->query(
                 $useNodeName . '[@href or @xlink:href]',
-                $elementReference->getElement()
+                $subject->getElement()
             );
             /** @var \DOMElement $useElement */
             foreach ($useElements as $useElement) {
-                $useId = null;
                 $useId = Helper::extractIdReferenceFromHref(
                     Helper::getElementHref($useElement)
                 );
                 if ($useId === null || !isset($this->subjects[$useId])) {
                     continue;
                 }
-                $elementReference->addUse($this->subjects[$useId]);
-                $this->subjects[$useId]->addUsedIn($elementReference);
+                $subject->addUse($this->subjects[$useId]);
+                $this->subjects[$useId]->addUsedIn($subject);
             }
         }
     }

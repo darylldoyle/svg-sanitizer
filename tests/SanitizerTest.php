@@ -211,9 +211,9 @@ class SanitizerTest extends TestCase
     }
 
     /**
-     *
+     * @test
      */
-    public function testUseRecursionDetection()
+    public function useRecursionsAreDetected()
     {
         $dataDirectory = __DIR__ . '/data';
         $initialData = file_get_contents($dataDirectory . '/xlinkLaughsTest.svg');
