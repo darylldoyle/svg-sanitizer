@@ -25,6 +25,27 @@ class Resolver
     {
         $this->collectIdentifiedElements();
         $this->processReferences();
+        $this->determineInvalidSubjects();
+    }
+
+    /**
+     * Resolves one subject by element.
+     *
+     * @param \DOMElement $element
+     * @param bool $considerChildren Whether to search in Subject's children as well
+     * @return Subject|null
+     */
+    public function findByElement(\DOMElement $element, $considerChildren = false)
+    {
+        foreach ($this->subjects as $subject) {
+            if (
+                $element === $subject->getElement()
+                || $considerChildren && Helper::isElementContainedIn($element, $subject->getElement())
+            ) {
+                return $subject;
+            }
+        }
+        return null;
     }
 
     /**
@@ -79,6 +100,23 @@ class Resolver
                 }
                 $subject->addUse($this->subjects[$useId]);
                 $this->subjects[$useId]->addUsedIn($subject);
+            }
+        }
+    }
+
+    /***
+     * Determines and tags infinite loops.
+     */
+    protected function determineInvalidSubjects()
+    {
+        foreach ($this->subjects as $subject) {
+            $useId = Helper::extractIdReferenceFromHref(
+                Helper::getElementHref($subject->getElement())
+            );
+            if ($useId === $subject->getElementId()) {
+                $subject->addTags([Subject::TAG_INVALID, Subject::TAG_SELF_REFERENCE]);
+            } elseif ($subject->hasInfiniteLoop()) {
+                $subject->addTags([Subject::TAG_INVALID, Subject::TAG_INFINITE_LOOP]);
             }
         }
     }

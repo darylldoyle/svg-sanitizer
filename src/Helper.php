@@ -29,4 +29,25 @@ class Helper
         }
         return substr($href, 1);
     }
+
+    /**
+     * @param \DOMElement $needle
+     * @param \DOMElement $haystack
+     * @return bool
+     */
+    public static function isElementContainedIn(\DOMElement $needle, \DOMElement $haystack)
+    {
+        if ($needle === $haystack) {
+            return true;
+        }
+        foreach ($haystack->childNodes as $childNode) {
+            if (!$childNode instanceof \DOMElement) {
+                continue;
+            }
+            if (self::isElementContainedIn($needle, $childNode)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

@@ -224,4 +224,19 @@ class SanitizerTest extends TestCase
 
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+    /**
+     * @test
+     */
+    public function infiniteUseLoopsAreDetected()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/xlinkLoopTest.svg');
+        $expected = file_get_contents($dataDirectory . '/xlinkLoopClean.svg');
+
+        $this->class->minify(false);
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }

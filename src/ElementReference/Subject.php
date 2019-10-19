@@ -3,6 +3,10 @@ namespace enshrined\svgSanitize\ElementReference;
 
 class Subject
 {
+    const TAG_INVALID = 1;
+    const TAG_SELF_REFERENCE = 2;
+    const TAG_INFINITE_LOOP = 3;
+
     /**
      * @var \DOMElement
      */
@@ -17,6 +21,11 @@ class Subject
      * @var Usage[]
      */
     protected $usedInCollection = [];
+
+    /**
+     * @var int[]
+     */
+    protected $tags = [];
 
     /**
      * @param \DOMElement $element
@@ -40,6 +49,43 @@ class Subject
     public function getElementId()
     {
         return $this->element->getAttribute('id');
+    }
+
+    /**
+     * @param array $subjects Previously processed subjects
+     * @return bool
+     */
+    public function hasInfiniteLoop(array $subjects = [])
+    {
+        if (in_array($this, $subjects, true)) {
+            return true;
+        }
+        $subjects[] = $this;
+        foreach ($this->useCollection as $usage) {
+            if ($usage->getSubject()->hasInfiniteLoop($subjects)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param int[] $tags (see Subject constants)
+     */
+    public function addTags(array $tags)
+    {
+        $tags = array_map('intval', $tags);
+        $this->tags = array_merge($this->tags, array_diff($tags, $this->tags));
+    }
+
+    /**
+     * @param int[] $tags (see Subject constants)
+     * @return bool
+     */
+    public function matchesTags(array $tags)
+    {
+        $amount = count($tags);
+        return $amount > 0 && count(array_intersect($this->tags, $tags)) === $amount;
     }
 
     /**

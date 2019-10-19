@@ -8,6 +8,7 @@ use enshrined\svgSanitize\data\AttributeInterface;
 use enshrined\svgSanitize\data\TagInterface;
 use enshrined\svgSanitize\data\XPath;
 use enshrined\svgSanitize\ElementReference\Resolver;
+use enshrined\svgSanitize\ElementReference\Subject;
 
 /**
  * Class Sanitizer
@@ -304,6 +305,15 @@ class Sanitizer
 
             $this->cleanHrefs($currentElement);
 
+            if ($this->isTaggedInvalid($currentElement)) {
+                $currentElement->parentNode->removeChild($currentElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Invalid \'' . $currentElement->tagName . '\'',
+                    'line' => $currentElement->getLineNo(),
+                );
+                continue;
+            }
+
             if (strtolower($currentElement->tagName) === 'use') {
                 if ($this->isUseTagDirty($currentElement)
                     || $this->isUseTagExceedingThreshold($currentElement)
@@ -482,6 +492,18 @@ class Sanitizer
     protected function isDataAttribute($attributeName)
     {
         return strpos($attributeName, 'data-') === 0;
+    }
+
+    /**
+     * Determines whether element is used in a Subject that has the "invalid" tag.
+     *
+     * @param \DOMElement $element
+     * @return bool
+     */
+    protected function isTaggedInvalid(\DOMElement $element)
+    {
+        $subject = $this->elementReferenceResolver->findByElement($element, true);
+        return $subject !== null && $subject->matchesTags([Subject::TAG_INVALID]);
     }
 
     /**
