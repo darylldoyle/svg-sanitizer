@@ -21,7 +21,7 @@ class Sanitizer
     /**
      * Regex to catch script and data values in attributes
      */
-    const SCRIPT_REGEX = '/(?:\w+script|data):/xi';
+    const SCRIPT_REGEX = '/(?:\w+script|data)(?:\s)?:/xi';
 
     /**
      * @var \DOMDocument
