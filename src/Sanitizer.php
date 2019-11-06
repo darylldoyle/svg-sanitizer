@@ -372,6 +372,7 @@ class Sanitizer
     protected function cleanXlinkHrefs(\DOMElement $element)
     {
         $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        $xlinks = $this->preFilterHrefValues($xlinks);
         if (preg_match(self::SCRIPT_REGEX, $xlinks) === 1) {
             if (!in_array(substr($xlinks, 0, 14), array(
                 'data:image/png', // PNG
@@ -399,6 +400,7 @@ class Sanitizer
     protected function cleanHrefs(\DOMElement $element)
     {
         $href = $element->getAttribute('href');
+        $href = $this->preFilterHrefValues($href);
         if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
             $element->removeAttribute('href');
             $this->xmlIssues[] = array(
@@ -406,6 +408,18 @@ class Sanitizer
                 'line' => $element->getLineNo(),
             );
         }
+    }
+
+    /**
+     * Only allow basic chars to run through the Script Regex.
+     *
+     * This should stop people from hiding scripts with hidden charachters etc.
+     *
+     * @param $value
+     * @return string|string[]|null
+     */
+    protected function preFilterHrefValues($value) {
+        return preg_replace( '/[^a-zA-Z0-9:\-\(\)\']/', '', $value );
     }
 
     /**
