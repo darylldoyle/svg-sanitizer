@@ -19,11 +19,6 @@ class Sanitizer
 {
 
     /**
-     * Regex to catch script and data values in attributes
-     */
-    const SCRIPT_REGEX = '/(?:\w+script|data)(?:\s)?:/xi';
-
-    /**
      * @var \DOMDocument
      */
     protected $xmlDocument;
@@ -372,22 +367,12 @@ class Sanitizer
     protected function cleanXlinkHrefs(\DOMElement $element)
     {
         $xlinks = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
-        if (preg_match(self::SCRIPT_REGEX, $xlinks) === 1) {
-            if (!in_array(substr($xlinks, 0, 14), array(
-                'data:image/png', // PNG
-                'data:image/gif', // GIF
-                'data:image/jpg', // JPG
-                'data:image/jpe', // JPEG
-                'data:image/pjp', // PJPEG
-            ))) {
-                $element->removeAttributeNS( 'http://www.w3.org/1999/xlink', 'href' );
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious attribute \'href\'',
-                    'line' => $element->getLineNo(),
-                );
-
-
-            }
+        if (false === $this->isHrefSafeValue($xlinks)) {
+            $element->removeAttributeNS( 'http://www.w3.org/1999/xlink', 'href' );
+            $this->xmlIssues[] = array(
+                'message' => 'Suspicious attribute \'href\'',
+                'line' => $element->getLineNo(),
+            );
         }
     }
 
@@ -399,13 +384,58 @@ class Sanitizer
     protected function cleanHrefs(\DOMElement $element)
     {
         $href = $element->getAttribute('href');
-        if (preg_match(self::SCRIPT_REGEX, $href) === 1) {
+        if (false === $this->isHrefSafeValue($href)) {
             $element->removeAttribute('href');
             $this->xmlIssues[] = array(
                 'message' => 'Suspicious attribute \'href\'',
                 'line' => $element->getLineNo(),
             );
         }
+    }
+
+/**
+ * Only allow whitelisted starts to be within the href.
+ *
+ * This will stop scripts etc from being passed through, with or without attempting to hide bypasses.
+ * This stops the need for us to use a complicated script regex.
+ *
+ * @param $value
+ * @return bool
+ */
+    protected function isHrefSafeValue($value) {
+
+        // Allow fragment identifiers.
+        if ('#' === substr($value, 0, 1)) {
+            return true;
+        }
+
+        // Allow relative URIs.
+        if ('/' === substr($value, 0, 1)) {
+            return true;
+        }
+
+        // Allow HTTPS domains.
+        if ('https://' === substr($value, 0, 8)) {
+            return true;
+        }
+
+        // Allow HTTP domains.
+        if ('http://' === substr($value, 0, 7)) {
+            return true;
+        }
+
+        // Allow known data URIs.
+        if (in_array(substr($value, 0, 14), array(
+            'data:image/png', // PNG
+            'data:image/gif', // GIF
+            'data:image/jpg', // JPG
+            'data:image/jpe', // JPEG
+            'data:image/pjp', // PJPEG
+        ))) {
+           return true;
+        }
+
+        return false;
     }
 
     /**

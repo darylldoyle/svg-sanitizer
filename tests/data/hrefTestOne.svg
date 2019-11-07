@@ -8,4 +8,5 @@
     <a xlink:href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' onload='alert(88)'%3E%3C/svg%3E">test 6</a>
 
     <a href="javascript&#9;:alert(document.domain)">test 7</a>
+    <a href="javascrip&#9;t:alert('0xd0ff9')">test 8</a>
 </svg>
