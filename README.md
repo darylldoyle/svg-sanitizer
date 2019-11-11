@@ -73,7 +73,7 @@ I've just released a WordPress plugin containing this code so you can sanitize y
 
 ## TYPO3
 
-An integration for TYPO3 CMS of this library is available as composer package `t3g/svg-sanitizer` at [https://bitbucket.typo3.com/projects/EXT/repos/svg_sanitizer/](https://bitbucket.typo3.com/projects/EXT/repos/svg_sanitizer/)
+An integration for TYPO3 CMS of this library is available as composer package `t3g/svg-sanitizer` at [https://github.com/TYPO3GmbH/svg_sanitizer](https://github.com/TYPO3GmbH/svg_sanitizer)
 
 ## Tests
 
