@@ -294,11 +294,11 @@ class Sanitizer
                 continue;
             }
 
-            $this->cleanAttributesOnWhitelist($currentElement);
+            $this->cleanHrefs($currentElement);
 
             $this->cleanXlinkHrefs($currentElement);
 
-            $this->cleanHrefs($currentElement);
+            $this->cleanAttributesOnWhitelist($currentElement);
 
             if ($this->isTaggedInvalid($currentElement)) {
                 $currentElement->parentNode->removeChild($currentElement);
@@ -343,6 +343,22 @@ class Sanitizer
                     'message' => 'Suspicious attribute \'' . $attrName . '\'',
                     'line' => $element->getLineNo(),
                 );
+            }
+
+            /**
+             * This is used for when a namespace isn't imported properly.
+             * Such as xlink:href when the xlink namespace isn't imported.
+             * We have to do this as the link is still ran in this case.
+             */
+            if (false !== strpos($attrName, 'href')) {
+                $href = $element->getAttribute($attrName);
+                if (false === $this->isHrefSafeValue($href)) {
+                    $element->removeAttribute($attrName);
+                    $this->xmlIssues[] = array(
+                        'message' => 'Suspicious attribute \'href\'',
+                        'line'    => $element->getLineNo(),
+                    );
+                }
             }
 
             // Do we want to strip remote references?
