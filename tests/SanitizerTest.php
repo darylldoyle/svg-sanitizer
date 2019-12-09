@@ -133,6 +133,20 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * Make sure that hrefs get sanitized correctly when the xlink namespace is omitted.
+     */
+    public function testSanitizeHrefsNoXlinkNamespace()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/hrefTestTwo.svg');
+        $expected = file_get_contents($dataDirectory . '/hrefCleanTwo.svg');
+
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
      * Make sure that external references get sanitized correctly
      */
     public function testSanitizeExternal()
