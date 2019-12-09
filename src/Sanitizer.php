@@ -451,6 +451,17 @@ class Sanitizer
            return true;
         }
 
+        // Allow known short data URIs.
+        if (in_array(substr($value, 0, 12), array(
+            'data:img/png', // PNG
+            'data:img/gif', // GIF
+            'data:img/jpg', // JPG
+            'data:img/jpe', // JPEG
+            'data:img/pjp', // PJPEG
+        ))) {
+            return true;
+        }
+
         return false;
     }
 
