@@ -209,11 +209,13 @@ class Sanitizer
         $xPath = new XPath($this->xmlDocument);
         $this->elementReferenceResolver = new Resolver($xPath);
         $this->elementReferenceResolver->collect();
+        $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
+
         // Grab all the elements
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
         // Start the cleaning proccess
-        $this->startClean($allElements);
+        $this->startClean($allElements, $elementsToRemove);
 
         // Save cleaned XML to a variable
         if ($this->removeXMLTag) {
@@ -274,8 +276,9 @@ class Sanitizer
      * Start the cleaning with tags, then we move onto attributes and hrefs later
      *
      * @param \DOMNodeList $elements
+     * @param array        $elementsToRemove
      */
-    protected function startClean(\DOMNodeList $elements)
+    protected function startClean(\DOMNodeList $elements, array $elementsToRemove)
     {
         // loop through all elements
         // we do this backwards so we don't skip anything if we delete a node
@@ -283,6 +286,15 @@ class Sanitizer
         for ($i = $elements->length - 1; $i >= 0; $i--) {
             /** @var \DOMElement $currentElement */
             $currentElement = $elements->item($i);
+
+            if (in_array($currentElement, $elementsToRemove)) {
+                $currentElement->parentNode->removeChild($currentElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Nesting level exceeded within \'' . $currentElement->tagName . '\'',
+                    'line' => $currentElement->getLineNo(),
+                );
+                continue;
+            }
 
             // If the tag isn't in the whitelist, remove it and continue with next iteration
             if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {

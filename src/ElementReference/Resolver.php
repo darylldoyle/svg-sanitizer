@@ -2,6 +2,7 @@
 namespace enshrined\svgSanitize\ElementReference;
 
 use enshrined\svgSanitize\data\XPath;
+use enshrined\svgSanitize\Exceptions\NestingException;
 use enshrined\svgSanitize\Helper;
 
 class Resolver
@@ -15,6 +16,11 @@ class Resolver
      * @var Subject[]
      */
     protected $subjects = [];
+
+    /**
+     * @var array DOMElement[]
+     */
+    protected $elementsToRemove = [];
 
     public function __construct(XPath $xPath)
     {
@@ -104,7 +110,7 @@ class Resolver
         }
     }
 
-    /***
+    /**
      * Determines and tags infinite loops.
      */
     protected function determineInvalidSubjects()
@@ -113,11 +119,25 @@ class Resolver
             $useId = Helper::extractIdReferenceFromHref(
                 Helper::getElementHref($subject->getElement())
             );
-            if ($useId === $subject->getElementId()) {
-                $subject->addTags([Subject::TAG_INVALID, Subject::TAG_SELF_REFERENCE]);
-            } elseif ($subject->hasInfiniteLoop()) {
-                $subject->addTags([Subject::TAG_INVALID, Subject::TAG_INFINITE_LOOP]);
+
+            try {
+                if ($useId === $subject->getElementId()) {
+                    $subject->addTags([Subject::TAG_INVALID, Subject::TAG_SELF_REFERENCE]);
+                } elseif ($subject->hasInfiniteLoop()) {
+                    $subject->addTags([Subject::TAG_INVALID, Subject::TAG_INFINITE_LOOP]);
+                }
+            } catch (NestingException $e) {
+                $this->elementsToRemove[] = $e->getElement();
             }
         }
+    }
+
+    /**
+     * Get all the elements that caused a nesting exception.
+     *
+     * @return array
+     */
+    public function getElementsToRemove() {
+        return $this->elementsToRemove;
     }
 }
