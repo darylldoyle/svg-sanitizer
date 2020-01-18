@@ -21,6 +21,7 @@ class AllowedAttributes implements AttributeInterface
     {
         return array(
             // HTML
+            'about',
             'accept',
             'action',
             'align',
@@ -46,6 +47,7 @@ class AllowedAttributes implements AttributeInterface
             'disabled',
             'download',
             'enctype',
+            'encoding',
             'face',
             'for',
             'headers',
@@ -108,6 +110,7 @@ class AllowedAttributes implements AttributeInterface
             'usemap',
             'valign',
             'value',
+            'version',
             'width',
             'xmlns',
 
