@@ -266,6 +266,6 @@ class SanitizerTest extends TestCase
         $this->class->minify(false);
         $cleanData = $this->class->sanitize($initialData);
 
-        $this->assertEquals($expected, $cleanData);
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 }
