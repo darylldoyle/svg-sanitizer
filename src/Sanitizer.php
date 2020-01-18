@@ -74,6 +74,11 @@ class Sanitizer
     protected $elementReferenceResolver;
 
     /**
+     * @var int
+     */
+    protected $useNestingLimit = 15;
+
+    /**
      *
      */
     function __construct()
@@ -207,13 +212,15 @@ class Sanitizer
 
         // Pre-process all identified elements
         $xPath = new XPath($this->xmlDocument);
-        $this->elementReferenceResolver = new Resolver($xPath);
+        $this->elementReferenceResolver = new Resolver($xPath, $this->useNestingLimit);
         $this->elementReferenceResolver->collect();
+        $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
+
         // Grab all the elements
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
         // Start the cleaning proccess
-        $this->startClean($allElements);
+        $this->startClean($allElements, $elementsToRemove);
 
         // Save cleaned XML to a variable
         if ($this->removeXMLTag) {
@@ -274,8 +281,9 @@ class Sanitizer
      * Start the cleaning with tags, then we move onto attributes and hrefs later
      *
      * @param \DOMNodeList $elements
+     * @param array        $elementsToRemove
      */
-    protected function startClean(\DOMNodeList $elements)
+    protected function startClean(\DOMNodeList $elements, array $elementsToRemove)
     {
         // loop through all elements
         // we do this backwards so we don't skip anything if we delete a node
@@ -283,6 +291,22 @@ class Sanitizer
         for ($i = $elements->length - 1; $i >= 0; $i--) {
             /** @var \DOMElement $currentElement */
             $currentElement = $elements->item($i);
+
+            /**
+             * If the element has exceeded the nesting limit, we should remove it.
+             *
+             * As it's only <use> elements that cause us issues with nesting DOS attacks
+             * we should check what the element is before removing it. For now we'll only
+             * remove <use> elements.
+             */
+            if (in_array($currentElement, $elementsToRemove) && 'use' === $currentElement->nodeName) {
+                $currentElement->parentNode->removeChild($currentElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Nesting level exceeded with \'' . $currentElement->tagName . '\'',
+                    'line'    => $currentElement->getLineNo(),
+                );
+                continue;
+            }
 
             // If the tag isn't in the whitelist, remove it and continue with next iteration
             if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
@@ -600,5 +624,15 @@ class Sanitizer
             }
         }
         return false;
+    }
+
+    /**
+     * Set the nesting limit for <use> tags.
+     *
+     * @param $limit
+     */
+    public function setUseNestingLimit($limit)
+    {
+        $this->useNestingLimit = (int) $limit;
     }
 }

@@ -2,6 +2,7 @@
 namespace enshrined\svgSanitize\ElementReference;
 
 use enshrined\svgSanitize\data\XPath;
+use enshrined\svgSanitize\Exceptions\NestingException;
 use enshrined\svgSanitize\Helper;
 
 class Resolver
@@ -16,9 +17,20 @@ class Resolver
      */
     protected $subjects = [];
 
-    public function __construct(XPath $xPath)
+    /**
+     * @var array DOMElement[]
+     */
+    protected $elementsToRemove = [];
+
+    /**
+     * @var int
+     */
+    protected $useNestingLimit;
+
+    public function __construct(XPath $xPath, $useNestingLimit)
     {
         $this->xPath = $xPath;
+        $this->useNestingLimit = $useNestingLimit;
     }
 
     public function collect()
@@ -74,7 +86,7 @@ class Resolver
         /** @var \DOMNodeList|\DOMElement[] $elements */
         $elements = $this->xPath->query('//*[@id]');
         foreach ($elements as $element) {
-            $this->subjects[$element->getAttribute('id')] = new Subject($element);
+            $this->subjects[$element->getAttribute('id')] = new Subject($element, $this->useNestingLimit);
         }
     }
 
@@ -104,7 +116,7 @@ class Resolver
         }
     }
 
-    /***
+    /**
      * Determines and tags infinite loops.
      */
     protected function determineInvalidSubjects()
@@ -113,11 +125,25 @@ class Resolver
             $useId = Helper::extractIdReferenceFromHref(
                 Helper::getElementHref($subject->getElement())
             );
-            if ($useId === $subject->getElementId()) {
-                $subject->addTags([Subject::TAG_INVALID, Subject::TAG_SELF_REFERENCE]);
-            } elseif ($subject->hasInfiniteLoop()) {
-                $subject->addTags([Subject::TAG_INVALID, Subject::TAG_INFINITE_LOOP]);
+
+            try {
+                if ($useId === $subject->getElementId()) {
+                    $subject->addTags([Subject::TAG_INVALID, Subject::TAG_SELF_REFERENCE]);
+                } elseif ($subject->hasInfiniteLoop()) {
+                    $subject->addTags([Subject::TAG_INVALID, Subject::TAG_INFINITE_LOOP]);
+                }
+            } catch (NestingException $e) {
+                $this->elementsToRemove[] = $e->getElement();
             }
         }
+    }
+
+    /**
+     * Get all the elements that caused a nesting exception.
+     *
+     * @return array
+     */
+    public function getElementsToRemove() {
+        return $this->elementsToRemove;
     }
 }
