@@ -9,6 +9,8 @@ use PHPUnit\Framework\TestCase;
  */
 class SubjectTest extends TestCase
 {
+    protected $nestingLimit = 15;
+
     /**
      * <first>
      *   <!-- 0 -->
@@ -19,7 +21,7 @@ class SubjectTest extends TestCase
     public function oneLevelCountsUseIsCorrect()
     {
         $first = new \DOMElement('first');
-        $firstSubject = new Subject($first);
+        $firstSubject = new Subject($first, $this->nestingLimit);
         self::assertSame(0, $firstSubject->countUse(false));
         self::assertSame(0, $firstSubject->countUse(true));
     }
@@ -36,8 +38,8 @@ class SubjectTest extends TestCase
     {
         $first = new \DOMElement('first');
         $second = new \DOMElement('second');
-        $firstSubject = new Subject($first);
-        $secondSubject = new Subject($second);
+        $firstSubject = new Subject($first, $this->nestingLimit);
+        $secondSubject = new Subject($second, $this->nestingLimit);
         $firstSubject->addUse($secondSubject);
         $firstSubject->addUse($secondSubject);
         self::assertSame(2, $firstSubject->countUse(false));
@@ -65,9 +67,9 @@ class SubjectTest extends TestCase
         $first = new \DOMElement('first');
         $second = new \DOMElement('second');
         $third = new \DOMElement('third');
-        $firstSubject = new Subject($first);
-        $secondSubject = new Subject($second);
-        $thirdSubject = new Subject($third);
+        $firstSubject = new Subject($first, $this->nestingLimit);
+        $secondSubject = new Subject($second, $this->nestingLimit);
+        $thirdSubject = new Subject($third, $this->nestingLimit);
         $firstSubject->addUse($secondSubject);
         $firstSubject->addUse($secondSubject);
         $secondSubject->addUse($thirdSubject);
@@ -86,7 +88,7 @@ class SubjectTest extends TestCase
     public function oneLevelCountsUsedInIsCorrect()
     {
         $first = new \DOMElement('first');
-        $firstSubject = new Subject($first);
+        $firstSubject = new Subject($first, $this->nestingLimit);
         self::assertSame(0, $firstSubject->countUsedIn());
     }
 
@@ -102,8 +104,8 @@ class SubjectTest extends TestCase
     {
         $first = new \DOMElement('first');
         $second = new \DOMElement('second');
-        $firstSubject = new Subject($first);
-        $secondSubject = new Subject($second);
+        $firstSubject = new Subject($first, $this->nestingLimit);
+        $secondSubject = new Subject($second, $this->nestingLimit);
         $secondSubject->addUsedIn($firstSubject);
         $secondSubject->addUsedIn($firstSubject);
         self::assertSame(2, $secondSubject->countUsedIn());
@@ -130,9 +132,9 @@ class SubjectTest extends TestCase
         $first = new \DOMElement('first');
         $second = new \DOMElement('second');
         $third = new \DOMElement('third');
-        $firstSubject = new Subject($first);
-        $secondSubject = new Subject($second);
-        $thirdSubject = new Subject($third);
+        $firstSubject = new Subject($first, $this->nestingLimit);
+        $secondSubject = new Subject($second, $this->nestingLimit);
+        $thirdSubject = new Subject($third, $this->nestingLimit);
         $thirdSubject->addUsedIn($secondSubject);
         $thirdSubject->addUsedIn($secondSubject);
         $thirdSubject->addUsedIn($secondSubject);

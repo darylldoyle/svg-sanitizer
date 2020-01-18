@@ -22,9 +22,15 @@ class Resolver
      */
     protected $elementsToRemove = [];
 
-    public function __construct(XPath $xPath)
+    /**
+     * @var int
+     */
+    protected $useNestingLimit;
+
+    public function __construct(XPath $xPath, $useNestingLimit)
     {
         $this->xPath = $xPath;
+        $this->useNestingLimit = $useNestingLimit;
     }
 
     public function collect()
@@ -80,7 +86,7 @@ class Resolver
         /** @var \DOMNodeList|\DOMElement[] $elements */
         $elements = $this->xPath->query('//*[@id]');
         foreach ($elements as $element) {
-            $this->subjects[$element->getAttribute('id')] = new Subject($element);
+            $this->subjects[$element->getAttribute('id')] = new Subject($element, $this->useNestingLimit);
         }
     }
 

@@ -28,11 +28,20 @@ class Subject
     protected $tags = [];
 
     /**
-     * @param \DOMElement $element
+     * @var int
      */
-    public function __construct(\DOMElement $element)
+    protected $useNestingLimit;
+
+    /**
+     * Subject constructor.
+     *
+     * @param \DOMElement $element
+     * @param int         $useNestingLimit
+     */
+    public function __construct(\DOMElement $element, $useNestingLimit)
     {
         $this->element = $element;
+        $this->useNestingLimit = $useNestingLimit;
     }
 
     /**
@@ -59,7 +68,7 @@ class Subject
      */
     public function hasInfiniteLoop(array $subjects = [], $level = 1)
     {
-        if ($level > 15) {
+        if ($level > $this->useNestingLimit) {
             throw new \enshrined\svgSanitize\Exceptions\NestingException('Nesting level too high, aborting', 1570713498, null, $this->getElement());
         }
 

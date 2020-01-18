@@ -74,6 +74,11 @@ class Sanitizer
     protected $elementReferenceResolver;
 
     /**
+     * @var int
+     */
+    protected $useNestingLimit = 15;
+
+    /**
      *
      */
     function __construct()
@@ -207,7 +212,7 @@ class Sanitizer
 
         // Pre-process all identified elements
         $xPath = new XPath($this->xmlDocument);
-        $this->elementReferenceResolver = new Resolver($xPath);
+        $this->elementReferenceResolver = new Resolver($xPath, $this->useNestingLimit);
         $this->elementReferenceResolver->collect();
         $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
 
@@ -619,5 +624,15 @@ class Sanitizer
             }
         }
         return false;
+    }
+
+    /**
+     * Set the nesting limit for <use> tags.
+     *
+     * @param $limit
+     */
+    public function setUseNestingLimit($limit)
+    {
+        $this->useNestingLimit = (int) $limit;
     }
 }
