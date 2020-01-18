@@ -287,11 +287,18 @@ class Sanitizer
             /** @var \DOMElement $currentElement */
             $currentElement = $elements->item($i);
 
-            if (in_array($currentElement, $elementsToRemove)) {
+            /**
+             * If the element has exceeded the nesting limit, we should remove it.
+             *
+             * As it's only <use> elements that cause us issues with nesting DOS attacks
+             * we should check what the element is before removing it. For now we'll only
+             * remove <use> elements.
+             */
+            if (in_array($currentElement, $elementsToRemove) && 'use' === $currentElement->nodeName) {
                 $currentElement->parentNode->removeChild($currentElement);
                 $this->xmlIssues[] = array(
-                    'message' => 'Nesting level exceeded within \'' . $currentElement->tagName . '\'',
-                    'line' => $currentElement->getLineNo(),
+                    'message' => 'Nesting level exceeded with \'' . $currentElement->tagName . '\'',
+                    'line'    => $currentElement->getLineNo(),
                 );
                 continue;
             }
