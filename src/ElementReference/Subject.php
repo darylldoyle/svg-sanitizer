@@ -3,10 +3,6 @@ namespace enshrined\svgSanitize\ElementReference;
 
 class Subject
 {
-    const TAG_INVALID = 1;
-    const TAG_SELF_REFERENCE = 2;
-    const TAG_INFINITE_LOOP = 3;
-
     /**
      * @var \DOMElement
      */
@@ -21,11 +17,6 @@ class Subject
      * @var Usage[]
      */
     protected $usedInCollection = [];
-
-    /**
-     * @var int[]
-     */
-    protected $tags = [];
 
     /**
      * @var int
@@ -85,25 +76,6 @@ class Subject
     }
 
     /**
-     * @param int[] $tags (see Subject constants)
-     */
-    public function addTags(array $tags)
-    {
-        $tags = array_map('intval', $tags);
-        $this->tags = array_merge($this->tags, array_diff($tags, $this->tags));
-    }
-
-    /**
-     * @param int[] $tags (see Subject constants)
-     * @return bool
-     */
-    public function matchesTags(array $tags)
-    {
-        $amount = count($tags);
-        return $amount > 0 && count(array_intersect($this->tags, $tags)) === $amount;
-    }
-
-    /**
      * @param Subject $subject
      */
     public function addUse(Subject $subject)
@@ -159,5 +131,23 @@ class Subject
             $count += $usedIn->getCount() * max(1, $usedIn->getSubject()->countUsedIn());
         }
         return $count;
+    }
+
+    /**
+     * Clear the internal arrays (to free up memory as they can get big)
+     * and return all the child usages DOMElement's
+     *
+     * @return array
+     */
+    public function clearInternalAndGetAffectedElements()
+    {
+        $elements = array_map(function(Usage $usage) {
+            return $usage->getSubject()->getElement();
+        }, $this->useCollection);
+
+        $this->usedInCollection = [];
+        $this->useCollection = [];
+
+        return $elements;
     }
 }

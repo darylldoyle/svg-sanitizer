@@ -302,7 +302,7 @@ class Sanitizer
             if (in_array($currentElement, $elementsToRemove) && 'use' === $currentElement->nodeName) {
                 $currentElement->parentNode->removeChild($currentElement);
                 $this->xmlIssues[] = array(
-                    'message' => 'Nesting level exceeded with \'' . $currentElement->tagName . '\'',
+                    'message' => 'Invalid \'' . $currentElement->tagName . '\'',
                     'line'    => $currentElement->getLineNo(),
                 );
                 continue;
@@ -323,15 +323,6 @@ class Sanitizer
             $this->cleanXlinkHrefs($currentElement);
 
             $this->cleanAttributesOnWhitelist($currentElement);
-
-            if ($this->isTaggedInvalid($currentElement)) {
-                $currentElement->parentNode->removeChild($currentElement);
-                $this->xmlIssues[] = array(
-                    'message' => 'Invalid \'' . $currentElement->tagName . '\'',
-                    'line' => $currentElement->getLineNo(),
-                );
-                continue;
-            }
 
             if (strtolower($currentElement->tagName) === 'use') {
                 if ($this->isUseTagDirty($currentElement)
@@ -573,18 +564,6 @@ class Sanitizer
     protected function isDataAttribute($attributeName)
     {
         return strpos($attributeName, 'data-') === 0;
-    }
-
-    /**
-     * Determines whether element is used in a Subject that has the "invalid" tag.
-     *
-     * @param \DOMElement $element
-     * @return bool
-     */
-    protected function isTaggedInvalid(\DOMElement $element)
-    {
-        $subject = $this->elementReferenceResolver->findByElement($element, true);
-        return $subject !== null && $subject->matchesTags([Subject::TAG_INVALID]);
     }
 
     /**

@@ -102,6 +102,7 @@ class Resolver
                 $useNodeName . '[@href or @xlink:href]',
                 $subject->getElement()
             );
+
             /** @var \DOMElement $useElement */
             foreach ($useElements as $useElement) {
                 $useId = Helper::extractIdReferenceFromHref(
@@ -122,18 +123,24 @@ class Resolver
     protected function determineInvalidSubjects()
     {
         foreach ($this->subjects as $subject) {
+
+            if (in_array($subject->getElement(), $this->elementsToRemove)) {
+                continue;
+            }
+
             $useId = Helper::extractIdReferenceFromHref(
                 Helper::getElementHref($subject->getElement())
             );
 
             try {
                 if ($useId === $subject->getElementId()) {
-                    $subject->addTags([Subject::TAG_INVALID, Subject::TAG_SELF_REFERENCE]);
+                    $this->markSubjectAsInvalid($subject);
                 } elseif ($subject->hasInfiniteLoop()) {
-                    $subject->addTags([Subject::TAG_INVALID, Subject::TAG_INFINITE_LOOP]);
+                    $this->markSubjectAsInvalid($subject);
                 }
             } catch (NestingException $e) {
                 $this->elementsToRemove[] = $e->getElement();
+                $this->markSubjectAsInvalid($subject);
             }
         }
     }
@@ -145,5 +152,18 @@ class Resolver
      */
     public function getElementsToRemove() {
         return $this->elementsToRemove;
+    }
+
+    /**
+     * The Subject is invalid for some reason, therefore we should
+     * remove it and all it's child usages.
+     *
+     * @param Subject $subject
+     */
+    protected function markSubjectAsInvalid(Subject $subject) {
+        $this->elementsToRemove = array_merge(
+            $this->elementsToRemove,
+            $subject->clearInternalAndGetAffectedElements()
+        );
     }
 }

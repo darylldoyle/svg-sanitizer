@@ -268,4 +268,20 @@ class SanitizerTest extends TestCase
 
         $this->assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+    /**
+     * Make sure that DOS attacks using the <use> element are detected,
+     * especially when the SVG is extremely large.
+     */
+    public function testLargeUseDOSattacksAreNullified()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/useDosTestTwo.svg');
+        $expected = file_get_contents($dataDirectory . '/useDosCleanTwo.svg');
+
+        $this->class->minify(false);
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }
