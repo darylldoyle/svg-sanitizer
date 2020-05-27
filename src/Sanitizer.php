@@ -435,6 +435,11 @@ class Sanitizer
  */
     protected function isHrefSafeValue($value) {
 
+        // Allow empty values
+        if (empty($value)) {
+            return true;
+        }
+
         // Allow fragment identifiers.
         if ('#' === substr($value, 0, 1)) {
             return true;
