@@ -27,21 +27,21 @@ class AllowedAttributesCustom extends enshrined\svgSanitize\data\AllowedAttribut
 			array(
 				// The extra attributes allowable
 				'animate',
-				'version',
-				'enable-background',
 				'cy',
 				'cx',
+				'enable-background',
+				'fill',
+				'fillRule',
 				'font-face',
 				'horiz-adv-x',
+				'missing-glyph',
 				'rx',
 				'ry',
-				'fill',
-				'missing-glyph',
+				'space',
 				'y',
 				'x',
-				'space',
 				'vector-effect',
-				'fillRule',
+				'version',
 			),
 			$default_allowed_attributes
 		);
