@@ -15,6 +15,27 @@ require_once( __DIR__ . '/src/data/AllowedTags.php' );
 require_once( __DIR__ . '/src/Sanitizer.php' );
 
 /*
+ * We need to allow certain extra tags, extend
+ * the AllowedTags class to enable that.
+ */
+class AllowedTagsCustom extends enshrined\svgSanitize\data\AllowedTags {
+	public static function getTags() {
+		$default_allowed_tags =
+			parent::getTags();
+
+		return array_merge(
+			$default_allowed_tags,
+			array(
+				// Extra tags allowable
+				'font-face',
+				'missing-glyph',
+				'animate',
+			)
+		);
+	}
+}
+
+/*
  * We need to allow certain extra attributes, so
  * extend the AllowedAttributes class to enable that.
  */
@@ -26,15 +47,12 @@ class AllowedAttributesCustom extends enshrined\svgSanitize\data\AllowedAttribut
 		return array_merge(
 			array(
 				// The extra attributes allowable
-				'animate',
 				'cy',
 				'cx',
 				'enable-background',
 				'fill',
 				'fillRule',
-				'font-face',
 				'horiz-adv-x',
-				'missing-glyph',
 				'rx',
 				'ry',
 				'space',
@@ -120,10 +138,14 @@ if ( empty( $files_to_scan ) ) {
 /*
  * Initialize the SVG scanner.
  *
- * Make sure to allow custom attributes,
+ * Make sure to allow custom attributes and tags,
  * and to remove remote references.
  */
 $sanitizer = new enshrined\svgSanitize\Sanitizer();
+
+$sanitizer->setAllowedTags(
+	new AllowedTagsCustom()
+);
 
 $sanitizer->setAllowedAttrs(
 	new AllowedAttributesCustom()
