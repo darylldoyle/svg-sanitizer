@@ -26,13 +26,17 @@ class AllowedAttributesCustom extends enshrined\svgSanitize\data\AllowedAttribut
 		return array_merge(
 			array(
 				// The extra attributes allowable
+				'animate',
 				'version',
 				'enable-background',
 				'cy',
 				'cx',
+				'font-face',
+				'horiz-adv-x',
 				'rx',
 				'ry',
 				'fill',
+				'missing-glyph',
 				'y',
 				'x',
 				'space',
