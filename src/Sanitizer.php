@@ -247,7 +247,7 @@ class Sanitizer
     {
         // This function has been deprecated in PHP 8.0 because in libxml 2.9.0, external entity loading is
         // disabled by default, so this function is no longer needed to protect against XXE attacks.
-        if (\PHP_VERSION_ID < 80000) {
+        if (\LIBXML_VERSION < 20900) {
             // Turn off the entity loader
             $this->xmlLoaderValue = libxml_disable_entity_loader(true);
         }
@@ -266,7 +266,7 @@ class Sanitizer
     {
         // This function has been deprecated in PHP 8.0 because in libxml 2.9.0, external entity loading is
         // disabled by default, so this function is no longer needed to protect against XXE attacks.
-        if (\PHP_VERSION_ID < 80000) {
+        if (\LIBXML_VERSION < 20900) {
             // Reset the entity loader
             libxml_disable_entity_loader($this->xmlLoaderValue);
         }
