@@ -154,6 +154,7 @@ class AllowedAttributes implements AttributeInterface
             'fill-opacity',
             'fill-rule',
             'filter',
+            'filterUnits',
             'flood-color',
             'flood-opacity',
             'font-family',
