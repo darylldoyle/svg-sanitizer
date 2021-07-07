@@ -388,7 +388,7 @@ class Sanitizer
             if($this->removeRemoteReferences) {
                 // Remove attribute if it has a remote reference
                 if (isset($element->attributes->item($x)->value) && $this->hasRemoteReference($element->attributes->item($x)->value)) {
-                    $result = $element->removeAttribute($attrName);
+                    $element->removeAttribute($attrName);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',
                         'line' => $element->getLineNo(),
