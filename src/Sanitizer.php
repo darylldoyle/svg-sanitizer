@@ -356,7 +356,7 @@ class Sanitizer
     {
         for ($x = $element->attributes->length - 1; $x >= 0; $x--) {
             // get attribute name
-            $attrName = $element->attributes->item($x)->name;
+            $attrName = $element->attributes->item($x)->nodeName;
 
             // Remove attribute if not in whitelist
             if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
@@ -388,7 +388,7 @@ class Sanitizer
             if($this->removeRemoteReferences) {
                 // Remove attribute if it has a remote reference
                 if (isset($element->attributes->item($x)->value) && $this->hasRemoteReference($element->attributes->item($x)->value)) {
-                    $element->removeAttribute($attrName);
+                    $result = $element->removeAttribute($attrName);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',
                         'line' => $element->getLineNo(),
@@ -515,13 +515,11 @@ class Sanitizer
         $value = $this->removeNonPrintableCharacters($value);
 
         $wrapped_in_url = preg_match('~^url\(\s*[\'"]\s*(.*)\s*[\'"]\s*\)$~xi', $value, $match);
-        if (!$wrapped_in_url){
-            return false;
+        if ($wrapped_in_url){
+            $value = trim($match[1], '\'"');
         }
 
-        $value = trim($match[1], '\'"');
-
-        return preg_match('~^((https?|ftp|file):)?//~xi', $value);
+        return preg_match('~^((http|https|ftp|ftps|file):)?//~xi', $value);
     }
 
     /**
