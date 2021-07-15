@@ -264,9 +264,10 @@ class SanitizerTest extends TestCase
         $expected = file_get_contents($dataDirectory . '/entityClean.svg');
 
         $this->class->minify(false);
+        $this->class->removeRemoteReferences(true);
         $cleanData = $this->class->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertSame($expected, $cleanData);
     }
 
     /**
