@@ -255,6 +255,21 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * @test
+     */
+    public function doctypeAndEntityAreRemoved()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/entityTest.svg');
+        $expected = file_get_contents($dataDirectory . '/entityClean.svg');
+
+        $this->class->minify(false);
+        $cleanData = $this->class->sanitize($initialData);
+
+        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
      * Make sure that DOS attacks using the <use> element are detected.
      */
     public function testUseDOSattacksAreNullified()
