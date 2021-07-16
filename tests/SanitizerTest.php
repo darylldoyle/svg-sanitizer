@@ -12,31 +12,14 @@ use PHPUnit\Framework\TestCase;
 class SanitizerTest extends TestCase
 {
     /**
-     * @var Sanitizer
-     */
-    protected $class;
-
-    /**
-     * Set up the test class
-     */
-    protected function setUp()
-    {
-        $this->class = new Sanitizer();
-    }
-
-    protected function tearDown()
-    {
-        unset($this->class);
-    }
-
-    /**
      * Make sure the initial tags are loaded
      */
     public function testLoadDefaultTags()
     {
-        $tags = $this->class->getAllowedTags();
+        $sanitizer = new Sanitizer();
+        $tags = $sanitizer->getAllowedTags();
 
-        $this->assertInternalType('array', $tags);
+        self::assertSame('array', gettype($tags));
     }
 
     /**
@@ -44,9 +27,10 @@ class SanitizerTest extends TestCase
      */
     public function testLoadDefaultAttributes()
     {
-        $attributes = $this->class->getAllowedAttrs();
+        $sanitizer = new Sanitizer();
+        $attributes = $sanitizer->getAllowedAttrs();
 
-        $this->assertInternalType('array', $attributes);
+        self::assertSame('array', gettype($attributes));
     }
 
     /**
@@ -54,13 +38,12 @@ class SanitizerTest extends TestCase
      */
     public function testSetCustomTags()
     {
-        $this->class->setAllowedTags(new TestAllowedTags());
+        $sanitizer = new Sanitizer();
+        $sanitizer->setAllowedTags(new TestAllowedTags());
+        $tags = $sanitizer->getAllowedTags();
 
-        $tags = $this->class->getAllowedTags();
-
-        $this->assertInternalType('array', $tags);
-
-        $this->assertEquals(array_map('strtolower', TestAllowedTags::getTags()), $tags);
+        self::assertSame('array', gettype($tags));
+        self::assertSame(array_map('strtolower', TestAllowedTags::getTags()), $tags);
     }
 
     /**
@@ -68,13 +51,12 @@ class SanitizerTest extends TestCase
      */
     public function testSetCustomAttributes()
     {
-        $this->class->setAllowedAttrs(new TestAllowedAttributes());
+        $sanitizer = new Sanitizer();
+        $sanitizer->setAllowedAttrs(new TestAllowedAttributes());
+        $attributes = $sanitizer->getAllowedAttrs();
 
-        $attributes = $this->class->getAllowedAttrs();
-
-        $this->assertInternalType('array', $attributes);
-
-        $this->assertEquals( array_map('strtolower', TestAllowedAttributes::getAttributes()), $attributes);
+        self::assertSame('array', gettype($attributes));
+        self::assertSame( array_map('strtolower', TestAllowedAttributes::getAttributes()), $attributes);
     }
 
     /**
@@ -86,9 +68,10 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/xmlTestOne.xml');
         $expected = file_get_contents($dataDirectory . '/xmlCleanOne.xml');
 
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -100,9 +83,10 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/svgTestOne.svg');
         $expected = file_get_contents($dataDirectory . '/svgCleanOne.svg');
 
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -113,9 +97,10 @@ class SanitizerTest extends TestCase
         $dataDirectory = __DIR__ . '/data';
         $initialData = file_get_contents($dataDirectory . '/badXmlTestOne.svg');
 
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertEquals(false, $cleanData);
+        self::assertSame(false, $cleanData);
     }
 
     /**
@@ -127,9 +112,10 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/hrefTestOne.svg');
         $expected = file_get_contents($dataDirectory . '/hrefCleanOne.svg');
 
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -141,9 +127,10 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/hrefTestTwo.svg');
         $expected = file_get_contents($dataDirectory . '/hrefCleanTwo.svg');
 
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -155,11 +142,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/externalTest.svg');
         $expected = file_get_contents($dataDirectory . '/externalClean.svg');
 
-        $this->class->removeRemoteReferences(true);
-        $cleanData = $this->class->sanitize($initialData);
-        $this->class->removeRemoteReferences(false);
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -171,11 +158,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/svgTestOne.svg');
         $expected = file_get_contents($dataDirectory . '/svgCleanOneMinified.svg');
 
-        $this->class->minify(true);
-        $cleanData = $this->class->sanitize($initialData);
-        $this->class->minify(false);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(true);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -187,11 +174,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/ariaDataTest.svg');
         $expected = file_get_contents($dataDirectory . '/ariaDataClean.svg');
 
-        $this->class->minify(false);
-        $cleanData = $this->class->sanitize($initialData);
-        $this->class->minify(false);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -203,11 +190,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/useTest.svg');
         $expected = file_get_contents($dataDirectory . '/useClean.svg');
 
-        $this->class->minify(false);
-        $cleanData = $this->class->sanitize($initialData);
-        $this->class->minify(false);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -215,13 +202,15 @@ class SanitizerTest extends TestCase
      */
     public function testMinifiedOptions()
     {
-        $this->class->minify(true);
-        $this->class->removeXMLTag(true);
-        $this->class->setXMLOptions(0);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(true);
+        $sanitizer->removeXMLTag(true);
+        $sanitizer->setXMLOptions(0);
 
         $input = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><title>chevron-double-down</title><path d="M4 11.73l.68-.73L12 17.82 19.32 11l.68.73-7.66 7.13a.5.5 0 0 1-.68 0z"/><path d="M4 5.73L4.68 5 12 11.82 19.32 5l.68.73-7.66 7.13a.5.5 0 0 1-.68 0z"/></svg>';
-        $output = $this->class->sanitize($input);
-        $this->assertEquals($input, $output);
+        $output = $sanitizer->sanitize($input);
+
+        self::assertSame($input, $output);
     }
 
     /**
@@ -233,10 +222,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/xlinkLaughsTest.svg');
         $expected = file_get_contents($dataDirectory . '/xlinkLaughsClean.svg');
 
-        $this->class->minify(false);
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -248,10 +238,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/xlinkLoopTest.svg');
         $expected = file_get_contents($dataDirectory . '/xlinkLoopClean.svg');
 
-        $this->class->minify(false);
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -263,10 +254,11 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/useDosTest.svg');
         $expected = file_get_contents($dataDirectory . '/useDosClean.svg');
 
-        $this->class->minify(false);
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
@@ -279,9 +271,10 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/useDosTestTwo.svg');
         $expected = file_get_contents($dataDirectory . '/useDosCleanTwo.svg');
 
-        $this->class->minify(false);
-        $cleanData = $this->class->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-        $this->assertXmlStringEqualsXmlString($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 }

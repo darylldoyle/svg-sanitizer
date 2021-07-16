@@ -9,6 +9,9 @@ use PHPUnit\Framework\TestCase;
  */
 class SubjectTest extends TestCase
 {
+    /**
+     * @var int
+     */
     protected $nestingLimit = 15;
 
     /**
