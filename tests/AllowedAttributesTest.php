@@ -18,7 +18,7 @@ class AllowedAttributesTest extends TestCase
     /**
      * Set up the test class
      */
-    public function setUp()
+    protected function setUp()
     {
         $this->class = new AllowedAttributes();
     }
