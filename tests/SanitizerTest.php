@@ -254,9 +254,10 @@ class SanitizerTest extends TestCase
         $initialData = file_get_contents($dataDirectory . '/entityTest.svg');
         $expected = file_get_contents($dataDirectory . '/entityClean.svg');
 
-        $this->class->minify(false);
-        $this->class->removeRemoteReferences(true);
-        $cleanData = $this->class->sanitize($initialData);
+	    $sanitizer = new Sanitizer();
+	    $sanitizer->minify(false);
+	    $sanitizer->removeRemoteReferences(true);
+	    $cleanData = $sanitizer->sanitize($initialData);
 
         self::assertSame($expected, $cleanData);
     }
