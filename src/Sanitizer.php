@@ -208,8 +208,6 @@ class Sanitizer
             return false;
         }
 
-        $this->removeDoctype();
-
         // Pre-process all identified elements
         $xPath = new XPath($this->xmlDocument);
         $this->elementReferenceResolver = new Resolver($xPath, $this->useNestingLimit);
@@ -219,6 +217,8 @@ class Sanitizer
         // Grab all the elements
         $allElements = $this->xmlDocument->getElementsByTagName("*");
 
+        // remove doctype after node elements have been analyzed
+        $this->removeDoctype();
         // Start the cleaning proccess
         $this->startClean($allElements, $elementsToRemove);
 
