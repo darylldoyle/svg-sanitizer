@@ -9,26 +9,13 @@ use PHPUnit\Framework\TestCase;
  */
 class AllowedAttributesTest extends TestCase
 {
-
-    /**
-     * @var AllowedAttributes
-     */
-    protected $class;
-
-    /**
-     * Set up the test class
-     */
-    public function setUp()
-    {
-        $this->class = new AllowedAttributes();
-    }
-
     /**
      * Test that the class implements the interface
      */
     public function testItImplementsTheInterface()
     {
-        $this->assertInstanceOf('enshrined\svgSanitize\data\AttributeInterface', $this->class);
+        $class = new AllowedAttributes();
+        self::assertInstanceOf('enshrined\svgSanitize\data\AttributeInterface', $class);
     }
 
     /**
@@ -37,7 +24,6 @@ class AllowedAttributesTest extends TestCase
     public function testThatItReturnsAnArray()
     {
         $result = AllowedAttributes::getAttributes();
-
-        $this->assertInternalType('array', $result);
+        self::assertSame('array', gettype($result));
     }
 }

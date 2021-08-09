@@ -9,26 +9,13 @@ use PHPUnit\Framework\TestCase;
  */
 class AllowedTagsTest extends TestCase
 {
-
-    /**
-     * @var AllowedTags
-     */
-    protected $class;
-
-    /**
-     * Set up the test class
-     */
-    public function setUp()
-    {
-        $this->class = new AllowedTags();
-    }
-
     /**
      * Test that the class implements the interface
      */
     public function testItImplementsTheInterface()
     {
-        $this->assertInstanceOf('enshrined\svgSanitize\data\TagInterface', $this->class);
+        $class = new AllowedTags();
+        self::assertInstanceOf('enshrined\svgSanitize\data\TagInterface', $class);
     }
 
     /**
@@ -37,7 +24,6 @@ class AllowedTagsTest extends TestCase
     public function testThatItReturnsAnArray()
     {
         $result = AllowedTags::getTags();
-
-        $this->assertInternalType('array', $result);
+        self::assertSame('array', gettype($result));
     }
 }
