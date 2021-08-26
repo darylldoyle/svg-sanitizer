@@ -23,11 +23,9 @@ jobs:
       - name: Validate composer.json and composer.lock
         run: composer validate
 
-#      - name: Lint PHP
-#        uses: overtrue/phplint@7.4
-#        with:
-#          path: .
-#          options: --exclude=vendor
+      - name: Lint PHP
+        run: |
+          find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 -P4 php -dxdebug.mode=off -l
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
