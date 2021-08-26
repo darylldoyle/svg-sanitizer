@@ -430,15 +430,15 @@ class Sanitizer
         }
     }
 
-/**
- * Only allow whitelisted starts to be within the href.
- *
- * This will stop scripts etc from being passed through, with or without attempting to hide bypasses.
- * This stops the need for us to use a complicated script regex.
- *
- * @param $value
- * @return bool
- */
+    /**
+     * Only allow whitelisted starts to be within the href.
+     *
+     * This will stop scripts etc from being passed through, with or without attempting to hide bypasses.
+     * This stops the need for us to use a complicated script regex.
+     *
+     * @param $value
+     * @return bool
+     */
     protected function isHrefSafeValue($value) {
 
         // Allow empty values
@@ -474,7 +474,7 @@ class Sanitizer
             'data:image/jpe', // JPEG
             'data:image/pjp', // PJPEG
         ))) {
-           return true;
+            return true;
         }
 
         // Allow known short data URIs.
