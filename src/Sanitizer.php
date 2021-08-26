@@ -39,9 +39,9 @@ class Sanitizer
     protected $xmlLoaderValue;
 
     /**
-     * @var bool
+     * @var bool|null
      */
-    protected $minifyXML = false;
+    protected $minifyXML = null;
 
     /**
      * @var bool
@@ -54,9 +54,9 @@ class Sanitizer
     protected $useThreshold = 1000;
 
     /**
-     * @var bool
+     * @var bool|null
      */
-    protected $removeXMLTag = false;
+    protected $removeXMLTag = null;
 
     /**
      * @var int
@@ -77,6 +77,11 @@ class Sanitizer
      * @var int
      */
     protected $useNestingLimit = 15;
+
+    /**
+     * @var bool
+     */
+    protected $autoDiscover = false;
 
     /**
      *
@@ -197,6 +202,7 @@ class Sanitizer
         // Strip php tags
         $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
 
+        $this->autoDiscover($dirty);
         $this->resetInternal();
         $this->setUpBefore();
 
@@ -553,6 +559,40 @@ class Sanitizer
     public function useThreshold($useThreshold = 1000)
     {
         $this->useThreshold = (int)$useThreshold;
+    }
+
+    /**
+     * Declares, whether options shall be auto-discovered processed content.
+     *
+     * @param $autoDiscover
+     */
+    public function setAutoDiscover($autoDiscover)
+    {
+        $this->autoDiscover = (bool) $autoDiscover;
+    }
+
+    protected function autoDiscover($svgContent)
+    {
+        if (!$this->autoDiscover) {
+            return;
+        }
+        $svgContent = (string) $svgContent;
+        // in case content does not start with XML prolog, keep it that way
+        if (!is_bool($this->removeXMLTag)
+            && !preg_match('/^\s*<\?xml[^>]+\?>/im', $svgContent)
+        ) {
+            $this->removeXMLTag = true;
+        }
+        // in case `<svg>...</svg>` does not have any vertical spaces, keep it that way
+        $start = strpos($svgContent, '<svg');
+        $end = strrpos($svgContent, '</svg>');
+        $outerHtml = $end > $start ? substr($svgContent, $start, $end - $start) : null;
+        if (!is_bool($this->minifyXML)
+            && $outerHtml !== null
+            && count(preg_split('/\v/m', $outerHtml)) === 1
+        ) {
+            $this->minifyXML = true;
+        }
     }
 
     /**

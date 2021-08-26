@@ -1,6 +1,7 @@
 <?php
 namespace enshrined\svgSanitize\Tests;
 
+use Closure;
 use enshrined\svgSanitize\Sanitizer;
 use enshrined\svgSanitize\Tests\Fixtures\TestAllowedAttributes;
 use enshrined\svgSanitize\Tests\Fixtures\TestAllowedTags;
@@ -293,5 +294,75 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($initialData);
 
         self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * @return string[][]
+     */
+    public function processingOptionsAreAutoDiscoveredDataProvider()
+    {
+        return [
+            'SVG, single line' => [
+                '<svg><text>test</text></svg>',
+                '<svg><text>test</text></svg>',
+            ],
+            'SVG, multiline' => [
+                '<svg>'
+                . "\n" . '  <text>test</text>'
+                . "\n" . '</svg>',
+                '<svg>'
+                // indentation caused by PHP DOM-parser
+                . "\n" . '  <text>test</text>'
+                . "\n" . '</svg>',
+            ],
+            'XML prolog, SVG single line' => [
+                '<?xml version="1.0" encoding="UTF-8"?> <svg><text>test</text></svg>',
+                '<?xml version="1.0" encoding="UTF-8"?> <svg><text>test</text></svg>',
+            ],
+            'XML prolog, SVG multiline' => [
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                . "\n" . '<svg>'
+                . "\n" . '  <text>test</text>'
+                . "\n" . '</svg>',
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                . "\n" . '<svg>'
+                . "\n" . '  <text>test</text>'
+                . "\n" . '</svg>'
+            ],
+            'SVG, single line, removeXMLTag disabled' => [
+                '<svg><text>test</text></svg>',
+                '<?xml version="1.0" encoding="UTF-8"?> <svg><text>test</text></svg>',
+                function(Sanitizer $sanitizer) {
+                    $sanitizer->removeXMLTag(false);
+                }
+            ],
+            'SVG, single line, minify disabled' => [
+                '<svg><text>test</text></svg>',
+                '<svg>'
+                // indentation caused by PHP DOM-parser
+                . "\n" . '  <text>test</text>'
+                . "\n" . '</svg>',
+                function(Sanitizer $sanitizer) {
+                    $sanitizer->minify(false);
+                }
+            ],
+        ];
+    }
+
+    /**
+     * @param string $input
+     * @param string $expectation
+     * @param Closure|null $initialization
+     * @test
+     * @dataProvider processingOptionsAreAutoDiscoveredDataProvider
+     */
+    public function processingOptionsAreAutoDiscovered($input, $expectation, Closure $initialization = null)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->setAutoDiscover(true);
+        if ($initialization instanceof Closure) {
+            $initialization($sanitizer);
+        }
+        self::assertSame($expectation, rtrim($sanitizer->sanitize($input)));
     }
 }
