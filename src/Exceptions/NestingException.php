@@ -1,8 +1,5 @@
 <?php
-
-
 namespace enshrined\svgSanitize\Exceptions;
-
 
 use Exception;
 

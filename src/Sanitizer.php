@@ -1,5 +1,4 @@
 <?php
-
 namespace enshrined\svgSanitize;
 
 use enshrined\svgSanitize\data\AllowedAttributes;
@@ -8,7 +7,6 @@ use enshrined\svgSanitize\data\AttributeInterface;
 use enshrined\svgSanitize\data\TagInterface;
 use enshrined\svgSanitize\data\XPath;
 use enshrined\svgSanitize\ElementReference\Resolver;
-use enshrined\svgSanitize\ElementReference\Subject;
 
 /**
  * Class Sanitizer
