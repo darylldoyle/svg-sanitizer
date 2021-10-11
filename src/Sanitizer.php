@@ -343,6 +343,27 @@ class Sanitizer
                     }
                 }
 
+                // Strip out font elements that will break out of foreign content.
+                if (strtolower($currentElement->tagName) === 'font') {
+                    $breaksOutOfForeignContent = false;
+                    for ($x = $currentElement->attributes->length - 1; $x >= 0; $x--) {
+                        // get attribute name
+                        $attrName = $currentElement->attributes->item( $x )->name;
+
+                        if (in_array($attrName, ['face', 'color', 'size'])) {
+                            $breaksOutOfForeignContent = true;
+                        }
+                    }
+
+                    if ($breaksOutOfForeignContent) {
+                        $currentElement->parentNode->removeChild($currentElement);
+                        $this->xmlIssues[] = array(
+                            'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
+                            'line' => $currentElement->getLineNo(),
+                        );
+                        continue;
+                    }
+                }
             }
 
             $this->cleanUnsafeNodes($currentElement);
