@@ -214,8 +214,6 @@ class Sanitizer
         $this->elementReferenceResolver->collect();
         $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
 
-        // remove doctype after node elements have been analyzed
-        $this->removeDoctype();
         // Start the cleaning proccess
         $this->startClean($this->xmlDocument->childNodes, $elementsToRemove);
 
@@ -266,19 +264,6 @@ class Sanitizer
         if (\LIBXML_VERSION < 20900) {
             // Reset the entity loader
             libxml_disable_entity_loader($this->xmlLoaderValue);
-        }
-    }
-
-    /**
-     * Remove the XML Doctype
-     * It may be caught later on output but that seems to be buggy, so we need to make sure it's gone
-     */
-    protected function removeDoctype()
-    {
-        foreach ($this->xmlDocument->childNodes as $child) {
-            if ($child->nodeType === XML_DOCUMENT_TYPE_NODE) {
-                $child->parentNode->removeChild($child);
-            }
         }
     }
 
