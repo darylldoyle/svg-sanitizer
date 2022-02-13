@@ -294,4 +294,17 @@ class SanitizerTest extends TestCase
 
         self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
+
+	public function testInvalidNodesAreHandled()
+	{
+		$dataDirectory = __DIR__ . '/data';
+		$initialData = file_get_contents($dataDirectory . '/htmlTest.svg');
+		$expected = file_get_contents($dataDirectory . '/htmlClean.svg');
+
+		$sanitizer = new Sanitizer();
+		$sanitizer->minify(false);
+		$cleanData = $sanitizer->sanitize($initialData);
+
+		self::assertXmlStringEqualsXmlString($expected, $cleanData);
+	}
 }

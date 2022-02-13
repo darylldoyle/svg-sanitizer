@@ -214,13 +214,10 @@ class Sanitizer
         $this->elementReferenceResolver->collect();
         $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
 
-        // Grab all the elements
-        $allElements = $this->xmlDocument->getElementsByTagName("*");
-
         // remove doctype after node elements have been analyzed
         $this->removeDoctype();
         // Start the cleaning proccess
-        $this->startClean($allElements, $elementsToRemove);
+        $this->startClean($this->xmlDocument->childNodes, $elementsToRemove);
 
         // Save cleaned XML to a variable
         if ($this->removeXMLTag) {
@@ -316,33 +313,63 @@ class Sanitizer
                 continue;
             }
 
-            // If the tag isn't in the whitelist, remove it and continue with next iteration
-            if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
-                $currentElement->parentNode->removeChild($currentElement);
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
-                    'line' => $currentElement->getLineNo(),
-                );
-                continue;
-            }
-
-            $this->cleanHrefs($currentElement);
-
-            $this->cleanXlinkHrefs($currentElement);
-
-            $this->cleanAttributesOnWhitelist($currentElement);
-
-            if (strtolower($currentElement->tagName) === 'use') {
-                if ($this->isUseTagDirty($currentElement)
-                    || $this->isUseTagExceedingThreshold($currentElement)
-                ) {
+            if ($currentElement instanceof \DOMElement) {
+                // If the tag isn't in the whitelist, remove it and continue with next iteration
+                if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
-                        'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
+                        'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
                         'line' => $currentElement->getLineNo(),
                     );
                     continue;
                 }
+
+                $this->cleanHrefs( $currentElement );
+
+                $this->cleanXlinkHrefs( $currentElement );
+
+                $this->cleanAttributesOnWhitelist($currentElement);
+
+                if (strtolower($currentElement->tagName) === 'use') {
+                    if ($this->isUseTagDirty($currentElement)
+                        || $this->isUseTagExceedingThreshold($currentElement)
+                    ) {
+                        $currentElement->parentNode->removeChild($currentElement);
+                        $this->xmlIssues[] = array(
+                            'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
+                            'line' => $currentElement->getLineNo(),
+                        );
+                        continue;
+                    }
+                }
+
+                // Strip out font elements that will break out of foreign content.
+                if (strtolower($currentElement->tagName) === 'font') {
+                    $breaksOutOfForeignContent = false;
+                    for ($x = $currentElement->attributes->length - 1; $x >= 0; $x--) {
+                        // get attribute name
+                        $attrName = $currentElement->attributes->item( $x )->name;
+
+                        if (in_array($attrName, ['face', 'color', 'size'])) {
+                            $breaksOutOfForeignContent = true;
+                        }
+                    }
+
+                    if ($breaksOutOfForeignContent) {
+                        $currentElement->parentNode->removeChild($currentElement);
+                        $this->xmlIssues[] = array(
+                            'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
+                            'line' => $currentElement->getLineNo(),
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            $this->cleanUnsafeNodes($currentElement);
+
+            if ($currentElement->hasChildNodes()) {
+                $this->startClean($currentElement->childNodes, $elementsToRemove);
             }
         }
     }
@@ -626,5 +653,51 @@ class Sanitizer
     public function setUseNestingLimit($limit)
     {
         $this->useNestingLimit = (int) $limit;
+    }
+
+    /**
+     * Determines whether a node is safe or not.
+     *
+     * @param \DOMNode $node
+     * @return bool
+     */
+    protected function isNodeSafe(\DOMNode $node) {
+        $safeNodes = [
+            '#text',
+        ];
+
+        if (!in_array($node->nodeName, $safeNodes, true)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Remove nodes that are either invalid or malformed.
+     *
+     * @param \DOMNode $currentElement The current element.
+     */
+    protected function cleanUnsafeNodes(\DOMNode $currentElement) {
+        // If the element doesn't have a tagname, remove it and continue with next iteration
+        if (!property_exists($currentElement, 'tagName')) {
+            if (!$this->isNodeSafe($currentElement)) {
+                $currentElement->parentNode->removeChild($currentElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious node \'' . $currentElement->nodeName . '\'',
+                    'line' => $currentElement->getLineNo(),
+                );
+
+                return;
+            }
+        }
+
+        if ( $currentElement->childNodes && $currentElement->childNodes->length > 0 ) {
+            for ($j = $currentElement->childNodes->length - 1; $j >= 0; $j--) {
+                /** @var \DOMElement $childElement */
+                $childElement = $currentElement->childNodes->item($j);
+                $this->cleanUnsafeNodes($childElement);
+            }
+        }
     }
 }
