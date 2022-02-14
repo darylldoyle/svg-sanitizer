@@ -28,8 +28,6 @@ jobs:
       - name: Code Coverage
         env:
             CC_TEST_REPORTER_ID: ${{ secrets.CODECLIMATE_REPORTER_ID }}
-            GIT_BRANCH: ${{ GITHUB_REF_NAME }}
-            GIT_COMMIT_SHA: ${{ GITHUB_SHA }}
         # Linux: https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64
         # macOS: https://codeclimate.com/downloads/test-reporter/test-reporter-latest-darwin-amd64
         # @todo Regenerate reporter ID and move it to GitHub secrets (internal environment vars)
