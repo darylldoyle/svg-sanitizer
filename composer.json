@@ -9,7 +9,8 @@
         }
     ],
     "scripts": {
-        "test": "phpunit --no-coverage"
+        "test": "phpunit --no-coverage",
+        "test:coverage": "phpunit"
     },
     "autoload": {
         "psr-4": {

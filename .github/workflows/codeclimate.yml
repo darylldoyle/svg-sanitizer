@@ -22,13 +22,18 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
 
+      - name: Run test suite
+        run: composer run-script test:coverage
+
       - name: Code Coverage
         env:
-            CODECLIMATE_REPORTER_ID: ${{ secrets.CODECLIMATE_REPORTER_ID }}
+            CC_TEST_REPORTER_ID: ${{ secrets.CODECLIMATE_REPORTER_ID }}
+            GIT_BRANCH: ${{ GITHUB_REF_NAME }}
+            GIT_COMMIT_SHA: ${{ GITHUB_SHA }}
         # Linux: https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64
         # macOS: https://codeclimate.com/downloads/test-reporter/test-reporter-latest-darwin-amd64
         # @todo Regenerate reporter ID and move it to GitHub secrets (internal environment vars)
         run: |
           curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
           chmod +x ./cc-test-reporter
-          ./cc-test-reporter after-build -r "$CODECLIMATE_REPORTER_ID"
+          ./cc-test-reporter after-build -t clover build/logs/clover.xml
