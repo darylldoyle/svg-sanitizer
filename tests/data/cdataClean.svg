@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+    <defs><style type="text/css">
+            circle { fill: gold; }
+            other { fill: "&lt;img src onerror=alert(2)&gt;"; }
+            other { fill: '&lt;img src onerror=alert(3)&gt;'; }
+       </style></defs> &lt;img src onerror=alert(4)&gt; and text <text> &lt;img src onerror=alert(5)&gt; and text </text><text> superfluous-but-okay </text><text> math comparison: x&lt;y or y&gt;z </text><text> math comparison: x&lt;y or y&gt;z </text></svg>

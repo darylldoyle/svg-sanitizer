@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+    <!--> <img src onerror=alert(1)> and text <!--><![CDATA[]]><![CDATA[ ]]><![CDATA[
+    ]]>
+    <defs>
+        <style type="text/css"><![CDATA[
+            circle { fill: gold; }
+            other { fill: "<img src onerror=alert(2)>"; }
+            other { fill: '<img src onerror=alert(3)>'; }
+       ]]></style>
+    </defs>
+    <![CDATA[ <img src onerror=alert(4)> and text ]]>
+    <text><![CDATA[ <img src onerror=alert(5)> and text ]]></text>
+    <text><![CDATA[ superfluous-but-okay ]]></text>
+    <text><![CDATA[ math comparison: x<y or y>z ]]></text>
+    <text><![CDATA[ math comparison: x<y or y>z ]]></text>
+</svg>
