@@ -1,8 +1,5 @@
 <?php
-
-
 namespace enshrined\svgSanitize\data;
-
 
 /**
  * Class AllowedTags

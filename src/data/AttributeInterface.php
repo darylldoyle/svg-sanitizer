@@ -1,7 +1,6 @@
 <?php
 namespace enshrined\svgSanitize\data;
 
-
 /**
  * Class AttributeInterface
  *

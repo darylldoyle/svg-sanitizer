@@ -1,0 +1,31 @@
+name: Code Climate
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 7.4
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Code Coverage
+        # Linux: https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64
+        # macOS: https://codeclimate.com/downloads/test-reporter/test-reporter-latest-darwin-amd64
+        # @todo Regenerate reporter ID and move it to GitHub secrets (internal environment vars)
+        run: |
+          curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+          chmod +x ./cc-test-reporter
+          ./cc-test-reporter after-build -r c051f6d29cce2d4ab0d6dfa460798b050cced025311f94ab3ba1ed50c7ceb31e
