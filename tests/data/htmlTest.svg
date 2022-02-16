@@ -4,4 +4,5 @@
     <?x ><img src onerror=alert(1)><?x?>
     <p/><![CDATA[ ><img src onerror=alert(1)> ]]>
     <font face=""/><![CDATA[ ><img src onerror=alert(1)> ]]>
+    <font FACE="test"/>
 </svg>

@@ -333,7 +333,7 @@ class Sanitizer
                         // get attribute name
                         $attrName = $currentElement->attributes->item( $x )->name;
 
-                        if (in_array($attrName, ['face', 'color', 'size'])) {
+                        if (in_array(strtolower($attrName), ['face', 'color', 'size'])) {
                             $breaksOutOfForeignContent = true;
                         }
                     }
