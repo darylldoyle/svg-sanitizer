@@ -40,7 +40,7 @@ You may pass your own whitelist of tags and attributes by using the `Sanitizer::
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
 
-## Remove remote references 
+## Remove remote references
 
 You have the option to remove attributes that reference remote files, this will stop HTTP leaks but will add an overhead to the sanitizer.
 
@@ -73,7 +73,8 @@ I've just released a WordPress plugin containing this code so you can sanitize y
 
 ## TYPO3
 
-An integration for TYPO3 CMS of this library is available as composer package `t3g/svg-sanitizer` at [https://github.com/TYPO3GmbH/svg_sanitizer](https://github.com/TYPO3GmbH/svg_sanitizer)
+This SVG sanitizer library is used per default in the core of TYPO3 v9 and later versions.
+See [corresponding changelog entry](https://docs.typo3.org/c/typo3/cms-core/main/en-us/Changelog/9.5.x/Important-94492-IntroduceSVGSanitizer.html) for more details.
 
 ## Tests
 
