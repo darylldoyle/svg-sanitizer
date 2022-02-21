@@ -639,40 +639,23 @@ class Sanitizer
     }
 
     /**
-     * Determines whether a node is safe or not.
-     *
-     * @param \DOMNode $node
-     * @return bool
-     */
-    protected function isNodeSafe(\DOMNode $node) {
-        $safeNodes = [
-            '#text',
-        ];
-
-        if (!in_array($node->nodeName, $safeNodes, true)) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
      * Remove nodes that are either invalid or malformed.
      *
      * @param \DOMNode $currentElement The current element.
      */
     protected function cleanUnsafeNodes(\DOMNode $currentElement) {
+        // Replace CDATA node with encoded text node
+        if ($currentElement instanceof \DOMCdataSection) {
+            $textNode = $currentElement->ownerDocument->createTextNode($currentElement->nodeValue);
+            $currentElement->parentNode->replaceChild($textNode, $currentElement);
         // If the element doesn't have a tagname, remove it and continue with next iteration
-        if (!property_exists($currentElement, 'tagName')) {
-            if (!$this->isNodeSafe($currentElement)) {
-                $currentElement->parentNode->removeChild($currentElement);
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious node \'' . $currentElement->nodeName . '\'',
-                    'line' => $currentElement->getLineNo(),
-                );
-
-                return;
-            }
+        } elseif (!$currentElement instanceof \DOMElement && !$currentElement instanceof \DOMText) {
+            $currentElement->parentNode->removeChild($currentElement);
+            $this->xmlIssues[] = array(
+                'message' => 'Suspicious node \'' . $currentElement->nodeName . '\'',
+                'line' => $currentElement->getLineNo(),
+            );
+            return;
         }
 
         if ( $currentElement->childNodes && $currentElement->childNodes->length > 0 ) {
