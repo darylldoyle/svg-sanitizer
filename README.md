@@ -1,12 +1,10 @@
 # svg-sanitizer
 
-[![Build Status](https://travis-ci.org/darylldoyle/svg-sanitizer.svg?branch=master)](https://travis-ci.org/darylldoyle/svg-sanitizer) [![Test Coverage](https://codeclimate.com/github/darylldoyle/svg-sanitizer/badges/coverage.svg)](https://codeclimate.com/github/darylldoyle/svg-sanitizer/coverage)
-
-This is my attempt at building a decent SVG sanitizer in PHP. The work is laregely borrowed from [DOMPurify](https://github.com/cure53/DOMPurify).
+:warning: **This is an interim package for TYPO3 CMS 7.6 ELTS only, providing changes to be compatible with PHP 5.5! Using this package in any other scope is and will not be supported.**
 
 ## Installation
 
-Either require `enshrined/svg-sanitize` through composer or download the repo and include the old way!
+Either require `t3g/svg-sanitize-elts7` through composer or download the repo and include the old way!
 
 ## Usage
 
@@ -40,7 +38,7 @@ You may pass your own whitelist of tags and attributes by using the `Sanitizer::
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
 
-## Remove remote references 
+## Remove remote references
 
 You have the option to remove attributes that reference remote files, this will stop HTTP leaks but will add an overhead to the sanitizer.
 
