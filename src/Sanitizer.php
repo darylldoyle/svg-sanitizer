@@ -214,7 +214,7 @@ class Sanitizer
         $this->elementReferenceResolver->collect();
         $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
 
-        // Start the cleaning proccess
+        // Start the cleaning process
         $this->startClean($this->xmlDocument->childNodes, $elementsToRemove);
 
         // Save cleaned XML to a variable
