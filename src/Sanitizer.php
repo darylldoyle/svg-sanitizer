@@ -183,7 +183,7 @@ class Sanitizer
      * Sanitize the passed string
      *
      * @param string $dirty
-     * @return string
+     * @return string|false
      */
     public function sanitize($dirty)
     {
