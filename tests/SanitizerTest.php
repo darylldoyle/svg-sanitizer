@@ -323,4 +323,36 @@ class SanitizerTest extends TestCase
 
 		self::assertXmlStringEqualsXmlString($expected, $cleanData);
 	}
+
+    /**
+     * @test
+     */
+    public function cdataBackgroundSectionIsSanitized()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/cdataTwoTest.svg');
+        $expected = file_get_contents($dataDirectory . '/cdataTwoClean.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * @test
+     */
+    public function formDataisSanitized()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/formDataTest.svg');
+        $expected = file_get_contents($dataDirectory . '/formDataClean.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 }

