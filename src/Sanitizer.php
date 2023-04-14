@@ -41,6 +41,11 @@ class Sanitizer
     /**
      * @var bool
      */
+    protected $xmlErrorHandlerPreviousValue;
+
+    /**
+     * @var bool
+     */
     protected $minifyXML = false;
 
     /**
@@ -247,8 +252,9 @@ class Sanitizer
             $this->xmlLoaderValue = libxml_disable_entity_loader(true);
         }
 
-        // Suppress the errors because we don't really have to worry about formation before cleansing
-        libxml_use_internal_errors(true);
+        // Suppress the errors because we don't really have to worry about formation before cleansing.
+        // See reset in resetAfter().
+        $this->xmlErrorHandlerPreviousValue = libxml_use_internal_errors(true);
 
         // Reset array of altered XML
         $this->xmlIssues = array();
@@ -265,6 +271,9 @@ class Sanitizer
             // Reset the entity loader
             libxml_disable_entity_loader($this->xmlLoaderValue);
         }
+
+        libxml_clear_errors();
+        libxml_use_internal_errors($this->xmlErrorHandlerPreviousValue);
     }
 
     /**
