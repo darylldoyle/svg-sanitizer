@@ -79,6 +79,11 @@ class Sanitizer
     protected $useNestingLimit = 15;
 
     /**
+     * @var HTMLPurifier_Config $purifierConfig
+     */
+    protected $purifierConfig;
+
+    /**
      *
      */
     function __construct()
@@ -169,6 +174,15 @@ class Sanitizer
     public function removeRemoteReferences($removeRemoteRefs = false)
     {
         $this->removeRemoteReferences = $removeRemoteRefs;
+    }
+
+    /**
+     * @param HTMLPurifier_Config $purifierConfig
+     * @return void
+     */
+    public function setPurifierConfig($purifierConfig)
+    {
+        $this->purifierConfig = $purifierConfig;
     }
 
     /**
@@ -648,7 +662,8 @@ class Sanitizer
     protected function cleanUnsafeNodes(\DOMNode $currentElement) {
         // Replace CDATA node with encoded text node
         if ($currentElement instanceof \DOMCdataSection) {
-            $purifier = new HTMLPurifier(HTMLPurifier_Config::createDefault());
+            $config = isset($this->purifierConfig) ? $this->purifierConfig : HTMLPurifier_Config::createDefault();
+            $purifier = new HTMLPurifier($config);
             $clean_html = $purifier->purify($currentElement->nodeValue);
             $textNode = $currentElement->ownerDocument->createTextNode($clean_html);
             $currentElement->parentNode->replaceChild($textNode, $currentElement);
