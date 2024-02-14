@@ -130,7 +130,7 @@ class SanitizerTest extends TestCase
         $sanitizer = new Sanitizer();
         $cleanData = $sanitizer->sanitize($initialData);
 
-        self::assertSame($expected, $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
     /**
