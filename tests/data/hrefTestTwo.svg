@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" height="600px" id="Layer_1" width="600px" x="0px" y="0px" xml:space="preserve">
+<svg xmlns="http://www.w3.org/2000/svg" height="600px" id="Layer_1" width="600px" x="0px" y="0px" xml:space="preserve" xmlns:xlink="http://www.w3.org/1999/xlink">
     <a href="javascript:alert(2)">test 1</a>
     <a xlink:href="javascript:alert(2)">test 2</a>
     <a href="#test3">test 3</a>
