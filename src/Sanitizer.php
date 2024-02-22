@@ -82,6 +82,11 @@ class Sanitizer
     protected $useNestingLimit = 15;
 
     /**
+     * @var bool
+     */
+    protected $allowHugeFiles = false;
+
+    /**
      *
      */
     function __construct()
@@ -183,6 +188,24 @@ class Sanitizer
         return $this->xmlIssues;
     }
 
+    /**
+     * Can we allow huge files?
+     *
+     * @return bool
+     */
+    public function getAllowHugeFiles() {
+        return $this->allowHugeFiles;
+    }
+
+    /**
+     * Set whether we can allow huge files.
+     *
+     * @param bool $allowHugeFiles
+     */
+    public function setAllowHugeFiles( $allowHugeFiles ) {
+        $this->allowHugeFiles = $allowHugeFiles;
+    }
+
 
     /**
      * Sanitize the passed string
@@ -203,7 +226,7 @@ class Sanitizer
         $this->resetInternal();
         $this->setUpBefore();
 
-        $loaded = $this->xmlDocument->loadXML($dirty);
+        $loaded = $this->xmlDocument->loadXML($dirty, $this->getAllowHugeFiles() ? LIBXML_PARSEHUGE : 0);
 
         // If we couldn't parse the XML then we go no further. Reset and return false
         if (!$loaded) {
