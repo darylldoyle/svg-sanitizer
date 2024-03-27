@@ -100,7 +100,20 @@ class SanitizerTest extends TestCase
         $sanitizer = new Sanitizer();
         $cleanData = $sanitizer->sanitize($initialData);
 
-        self::assertSame(false, $cleanData);
+        self::assertFalse($cleanData);
+        self::assertEquals(
+            [
+                [
+                    'message' => 'Opening and ending tag mismatch: line line 8 and svg',
+                    'line' => 15,
+                ],
+                [
+                    'message' => 'Premature end of data in tag svg line 4',
+                    'line' => 16,
+                ],
+            ],
+            $sanitizer->getXmlIssues(),
+        );
     }
 
     /**
