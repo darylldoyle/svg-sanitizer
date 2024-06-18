@@ -112,7 +112,7 @@ class SanitizerTest extends TestCase
                     'line' => 16,
                 ],
             ],
-            $sanitizer->getXmlIssues(),
+            $sanitizer->getXmlIssues()
         );
     }
 
