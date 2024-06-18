@@ -230,6 +230,7 @@ class Sanitizer
 
         // If we couldn't parse the XML then we go no further. Reset and return false
         if (!$loaded) {
+            $this->xmlIssues = self::getXmlErrors();
             $this->resetAfter();
             return false;
         }
@@ -697,5 +698,22 @@ class Sanitizer
                 $this->cleanUnsafeNodes($childElement);
             }
         }
+    }
+
+    /**
+     * Retrieve array of errors
+     * @return array
+     */
+    private static function getXmlErrors()
+    {
+        $errors = [];
+        foreach (libxml_get_errors() as $error) {
+            $errors[] = [
+                'message' => trim($error->message),
+                'line' => $error->line,
+            ];
+        }
+
+        return $errors;
     }
 }
