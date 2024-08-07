@@ -220,8 +220,13 @@ class Sanitizer
             return '';
         }
 
-        // Strip php tags
-        $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
+        do {
+            /*
+             * recursively remove php tags because they can be hidden inside tags
+             * i.e. <?p<?php test?>hp echo . ' danger! ';?>
+             */
+            $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
+        } while (preg_match('/<\?(=|php)(.+?)\?>/i', $dirty) != 0);
 
         $this->resetInternal();
         $this->setUpBefore();
