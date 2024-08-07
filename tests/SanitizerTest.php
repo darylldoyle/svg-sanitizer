@@ -308,34 +308,34 @@ class SanitizerTest extends TestCase
         self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
-	public function testInvalidNodesAreHandled()
-	{
-		$dataDirectory = __DIR__ . '/data';
-		$initialData = file_get_contents($dataDirectory . '/htmlTest.svg');
-		$expected = file_get_contents($dataDirectory . '/htmlClean.svg');
+    public function testInvalidNodesAreHandled()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/htmlTest.svg');
+        $expected = file_get_contents($dataDirectory . '/htmlClean.svg');
 
-		$sanitizer = new Sanitizer();
-		$sanitizer->minify(false);
-		$cleanData = $sanitizer->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-		self::assertXmlStringEqualsXmlString($expected, $cleanData);
-	}
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 
     /**
      * @test
      */
-	public function cdataSectionIsSanitized()
-	{
-		$dataDirectory = __DIR__ . '/data';
-		$initialData = file_get_contents($dataDirectory . '/cdataTest.svg');
-		$expected = file_get_contents($dataDirectory . '/cdataClean.svg');
+    public function cdataSectionIsSanitized()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/cdataTest.svg');
+        $expected = file_get_contents($dataDirectory . '/cdataClean.svg');
 
-		$sanitizer = new Sanitizer();
-		$sanitizer->minify(false);
-		$cleanData = $sanitizer->sanitize($initialData);
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
 
-		self::assertXmlStringEqualsXmlString($expected, $cleanData);
-	}
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
 
     /**
      * @test
@@ -367,5 +367,49 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($initialData);
 
         self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * @test
+     */
+    public function maliciousSvgJsSanitized()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/maliciousJsAndPhpTest.svg');
+        $expected = file_get_contents($dataDirectory . '/maliciousJsAndPhpClean.svg');
+
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * @test
+     */
+    public function maliciousSvgPhpTagsStripped()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/maliciousJsAndPhpTest.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        $useNewMethod = true;
+
+        if (!method_exists($this, 'assertStringNotContainsStringIgnoringCase')) {
+            $useNewMethod = false;
+        }
+
+        foreach (['<?php', '<?='] as $value) {
+            if ($useNewMethod) {
+                self::assertStringNotContainsStringIgnoringCase($value, $cleanData);
+            } else {
+                self::assertThat($cleanData, $this->logicalNot($this->stringContains($value, true)));
+            }
+        }
     }
 }
