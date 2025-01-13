@@ -260,7 +260,7 @@ class Sanitizer
 
         // Remove any extra whitespaces when minifying
         if ($this->minifyXML) {
-            $clean = preg_replace('/\s+/', ' ', $clean);
+            $clean = trim(preg_replace('/\s+/', ' ', $clean));
         }
 
         // Return result
