@@ -586,13 +586,11 @@ class Sanitizer
         $value = $this->removeNonPrintableCharacters($value);
 
         $wrapped_in_url = preg_match('~^url\(\s*[\'"]\s*(.*)\s*[\'"]\s*\)$~xi', $value, $match);
-        if (!$wrapped_in_url){
-            return false;
+        if ($wrapped_in_url){
+            $value = trim($match[1], '\'"');
         }
 
-        $value = trim($match[1], '\'"');
-
-        return preg_match('~^((https?|ftp|file):)?//~xi', $value);
+        return preg_match('~^((http|https|ftp|ftps|file):)?//~xi', $value);
     }
 
     /**
