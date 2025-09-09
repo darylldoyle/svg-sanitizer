@@ -258,6 +258,17 @@ class Sanitizer
 
         $this->resetAfter();
 
+        // extract and merge invisible tags
+        $clean = preg_replace_callback('/<defs[^>]*>(?<defs>.+?)<\/defs>|<style[^>]*>(?<styl>.+?)<\/style>/s',function(array $result): string
+        {
+            if (isset($result['defs'])) $this->defs[] = $result['defs'];
+            if (isset($result['styl'])) $this->styl[] = $result['styl'];
+            return '';// remove finding
+        },$clean);
+        
+        if (!empty($this->defs)) $clean = preg_replace('/(<svg[^>]*>)/','$1<defs>' .implode('',$this->defs).'</defs>');
+        if (!empty($this->styl)) $clean = preg_replace('/(<svg[^>]*>)/','$1<style>'.implode('',$this->styl).'</style>');
+        
         // Remove any extra whitespaces when minifying
         if ($this->minifyXML) {
             $clean = preg_replace('/\s+/', ' ', $clean);
