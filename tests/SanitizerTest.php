@@ -259,20 +259,195 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * The DTD is now stripped before parsing, so a document that references a custom
+     * entity ends up referencing an *undefined* entity. libxml rejects it and the
+     * sanitizer returns false (fail-safe) rather than a cleaned string.
+     *
      * @test
      */
     public function doctypeAndEntityAreRemoved()
     {
         $dataDirectory = __DIR__ . '/data';
         $initialData = file_get_contents($dataDirectory . '/entityTest.svg');
-        $expected = file_get_contents($dataDirectory . '/entityClean.svg');
 
         $sanitizer = new Sanitizer();
         $sanitizer->minify(false);
         $sanitizer->removeRemoteReferences(true);
         $cleanData = $sanitizer->sanitize($initialData);
 
-        self::assertSame($expected, $cleanData);
+        self::assertFalse($cleanData);
+
+        // Rejected for the right reason: the custom entity is no longer defined.
+        $rejectedForUndefinedEntity = false;
+        foreach ($sanitizer->getXmlIssues() as $issue) {
+            if (stripos($issue['message'], 'not defined') !== false) {
+                $rejectedForUndefinedEntity = true;
+                break;
+            }
+        }
+        self::assertTrue($rejectedForUndefinedEntity, 'Expected an undefined-entity parse error');
+    }
+
+    /**
+     * A PUBLIC DOCTYPE with no entity definitions (typical Illustrator/Inkscape export)
+     * must still sanitize normally after the DTD is stripped.
+     *
+     * @test
+     */
+    public function publicDoctypeWithoutEntitiesStillSanitizes()
+    {
+        $svg = "<?xml version=\"1.0\"?>\n"
+            . "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n"
+            . "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\"/></svg>";
+
+        $sanitizer = new Sanitizer();
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false !== strpos($clean, '<svg'), 'svg root should survive');
+        self::assertTrue(false !== strpos($clean, '<rect'), 'rect should survive');
+        self::assertTrue(false === stripos($clean, '<!DOCTYPE'), 'DOCTYPE should be stripped');
+    }
+
+    /**
+     * Issue 1 (GHSA-9rjx-3jch-6vjf): a custom DTD entity that collides with an HTML5
+     * named character reference (e.g. &Tab; => U+0009) must not be able to smuggle a
+     * javascript: URL through an href. Stripping the DTD makes the entity undefined,
+     * so the document is rejected outright.
+     *
+     * @test
+     */
+    public function entityHrefBypassIsRejected()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/entityHrefBypassTest.svg');
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        // Undefined entity after DTD removal -> libxml rejects -> false.
+        self::assertFalse($cleanData);
+    }
+
+    /**
+     * Issue 2 (GHSA-v383-3rw5-q8rf): a DTD #FIXED attribute default used to trigger a
+     * double removeAttribute() on a DTD-materialised attribute, corrupting libxml
+     * memory (SIGABRT on libxml < 2.9.x). After DTD stripping the attribute never
+     * materialises, so there is nothing to double-remove.
+     *
+     * NOTE: the crash only reproduces on older libxml; on newer libxml this passes
+     * even without the fix, so it serves as a regression guard rather than a
+     * red->green test on modern environments.
+     *
+     * @test
+     */
+    public function attlistFixedDefaultDoesNotCrashAndIsRemoved()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/attlistFixedDosTest.svg');
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertTrue(is_string($cleanData), 'valid body should still sanitize to a string');
+        self::assertTrue(false === stripos($cleanData, 'badhref'), 'DTD-defaulted attribute must be gone');
+        self::assertTrue(false === strpos($cleanData, 'javascript:'), 'payload must not survive');
+    }
+
+    /**
+     * Issue 3 (Report 2.2): a bare remote href must be stripped under
+     * removeRemoteReferences(true).
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsBareRemoteImageHref()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<image href="https://evil.com/x.png"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'remote image href should be removed');
+    }
+
+    /**
+     * Issue 3 (Report 2.3): an unquoted url() remote reference must be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsUnquotedRemoteUrl()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<rect fill="url(https://evil.com/x)" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'unquoted remote url() should be removed');
+    }
+
+    /**
+     * Issue 3 (#116): a remote url() embedded among other declarations inside a style
+     * attribute must be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsRemoteUrlInStyleAttribute()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<rect style="fill:url(https://evil.com/x);stroke:red" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'remote url() in style attribute should be removed');
+    }
+
+    /**
+     * Issue 3: remote @import / url() inside a <style> element must be stripped, while
+     * legitimate local CSS rules are preserved.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsRemoteCssInStyleElement()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>@import url(https://evil.com/x.css); .a{fill:red}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'remote @import should be removed');
+        self::assertTrue(false !== strpos($clean, 'fill:red'), 'legitimate local CSS should be preserved');
+    }
+
+    /**
+     * Regression guard: local fragment references must be preserved under
+     * removeRemoteReferences(true).
+     *
+     * @test
+     */
+    public function removeRemoteReferencesKeepsLocalFragmentUrl()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<rect fill="url(#grad)" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false !== strpos($clean, '#grad'), 'local fragment reference should be kept');
     }
 
     /**

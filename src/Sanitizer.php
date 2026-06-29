@@ -228,6 +228,11 @@ class Sanitizer
             $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
         } while (preg_match('/<\?(=|php)(.+?)\?>/i', $dirty) != 0);
 
+        // Strip any DOCTYPE/DTD before parsing. This prevents custom entity
+        // definitions (which can collide with HTML5 named character references)
+        // and DTD-defaulted attributes from ever reaching libxml.
+        $dirty = $this->removeDoctype($dirty);
+
         $this->resetInternal();
         $this->setUpBefore();
 
@@ -265,6 +270,49 @@ class Sanitizer
 
         // Return result
         return $clean;
+    }
+
+    /**
+     * Remove any DOCTYPE declaration (and its internal subset) from the input
+     * string before it reaches the XML parser.
+     *
+     * The internal subset is scanned with balanced brackets so that a `>`
+     * appearing inside an entity value cannot prematurely terminate the match.
+     *
+     * @param string $dirty
+     * @return string
+     */
+    protected function removeDoctype($dirty)
+    {
+        if (stripos($dirty, '<!DOCTYPE') === false) {
+            return $dirty;
+        }
+
+        $output = '';
+        $offset = 0;
+        $length = strlen($dirty);
+
+        while (($start = stripos($dirty, '<!DOCTYPE', $offset)) !== false) {
+            $output .= substr($dirty, $offset, $start - $offset);
+            $i = $start + strlen('<!DOCTYPE');
+            $depth = 0;
+            for (; $i < $length; $i++) {
+                $char = $dirty[$i];
+                if ($char === '[') {
+                    $depth++;
+                } elseif ($char === ']') {
+                    if ($depth > 0) {
+                        $depth--;
+                    }
+                } elseif ($char === '>' && $depth === 0) {
+                    $i++;
+                    break;
+                }
+            }
+            $offset = $i;
+        }
+
+        return $output . substr($dirty, $offset);
     }
 
     /**
@@ -345,6 +393,16 @@ class Sanitizer
                     continue;
                 }
 
+                // Strip remote @import / url() references from inline <style> text.
+                // The text content of <style> is never otherwise inspected, so remote
+                // CSS references would pass straight through.
+                if (strtolower($currentElement->tagName) === 'style' && $this->removeRemoteReferences) {
+                    $css = $currentElement->textContent;
+                    $css = preg_replace('~@import\b[^;]*;?~i', '', $css);
+                    $css = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $css);
+                    $currentElement->textContent = $css;
+                }
+
                 $this->cleanHrefs( $currentElement );
 
                 $this->cleanXlinkHrefs( $currentElement );
@@ -414,6 +472,11 @@ class Sanitizer
                     'message' => 'Suspicious attribute \'' . $attrName . '\'',
                     'line' => $element->getLineNo(),
                 );
+
+                // Once removed, skip the remaining checks for this attribute so the
+                // same name can never be passed to removeAttribute() twice in one
+                // iteration (a DTD-defaulted attribute could otherwise re-materialise).
+                continue;
             }
 
             /**
@@ -434,8 +497,11 @@ class Sanitizer
 
             // Do we want to strip remote references?
             if($this->removeRemoteReferences) {
-                // Remove attribute if it has a remote reference
-                if (isset($element->attributes->item($x)->value) && $this->hasRemoteReference($element->attributes->item($x)->value)) {
+                $attr = $element->attributes->item($x);
+                $value = ($attr !== null && isset($attr->value)) ? $attr->value : '';
+                // Remove attribute if it embeds a remote url()/@import reference, or
+                // if the value is itself a remote URL (e.g. a bare href/src).
+                if ($this->hasRemoteReference($value) || $this->isRemoteUrl($value)) {
                     $element->removeAttribute($attrName);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',
@@ -576,7 +642,12 @@ class Sanitizer
     }
 
     /**
-     * Does this attribute value have a remote reference?
+     * Does this attribute value embed a remote reference anywhere within it?
+     *
+     * Detects a remote `url(...)` or remote `@import` regardless of quoting and
+     * regardless of where it appears in the value (e.g. amongst other CSS
+     * declarations in a `style` attribute). Only remote targets are flagged, so
+     * local (`/x`) and fragment (`#x`) references are preserved.
      *
      * @param $value
      * @return bool
@@ -585,14 +656,31 @@ class Sanitizer
     {
         $value = $this->removeNonPrintableCharacters($value);
 
-        $wrapped_in_url = preg_match('~^url\(\s*[\'"]\s*(.*)\s*[\'"]\s*\)$~xi', $value, $match);
-        if (!$wrapped_in_url){
-            return false;
+        if (preg_match('~url\(\s*[\'"]?\s*((?:https?|ftp|file):)?//~xi', $value)) {
+            return true;
         }
 
-        $value = trim($match[1], '\'"');
+        if (preg_match('~@import\s+(?:url\(\s*)?[\'"]?\s*((?:https?|ftp|file):)?//~xi', $value)) {
+            return true;
+        }
 
-        return preg_match('~^((https?|ftp|file):)?//~xi', $value);
+        return false;
+    }
+
+    /**
+     * Is the value itself a remote URL (a bare href/src rather than a url() wrapper)?
+     *
+     * Flags absolute (`http(s)`/`ftp`/`file`) and protocol-relative (`//`) URLs while
+     * leaving local (`/x`) and fragment (`#x`) references untouched.
+     *
+     * @param $value
+     * @return bool
+     */
+    protected function isRemoteUrl($value)
+    {
+        $value = $this->removeNonPrintableCharacters($value);
+
+        return (bool) preg_match('~^\s*(?:(?:https?|ftp|file):)?//~i', $value);
     }
 
     /**
