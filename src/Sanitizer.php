@@ -299,25 +299,26 @@ class Sanitizer
             for (; $i < $length; $i++) {
                 $char = $dirty[$i];
 
-                // Skip over DTD comments so a bracket or '>' inside them is not counted.
+                // A '[', ']' or '>' inside a DTD comment is not a real internal-subset
+                // delimiter and must not affect the bracket depth.
                 if ($char === '<' && substr($dirty, $i, 4) === '<!--') {
                     $commentEnd = strpos($dirty, '-->', $i + 4);
                     if ($commentEnd === false) {
                         $i = $length;
                         break;
                     }
-                    $i = $commentEnd + 2; // loop's $i++ steps past the closing '>'
+                    $i = $commentEnd + 2;
                     continue;
                 }
 
-                // Skip over quoted strings so a bracket or '>' inside them is not counted.
+                // Likewise for a '[', ']' or '>' inside a quoted string.
                 if ($char === '"' || $char === "'") {
                     $stringEnd = strpos($dirty, $char, $i + 1);
                     if ($stringEnd === false) {
                         $i = $length;
                         break;
                     }
-                    $i = $stringEnd; // loop's $i++ steps past the closing quote
+                    $i = $stringEnd;
                     continue;
                 }
 
