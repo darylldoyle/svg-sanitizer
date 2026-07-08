@@ -298,6 +298,29 @@ class Sanitizer
             $depth = 0;
             for (; $i < $length; $i++) {
                 $char = $dirty[$i];
+
+                // Skip over DTD comments so a bracket or '>' inside them is not counted.
+                if ($char === '<' && substr($dirty, $i, 4) === '<!--') {
+                    $commentEnd = strpos($dirty, '-->', $i + 4);
+                    if ($commentEnd === false) {
+                        $i = $length;
+                        break;
+                    }
+                    $i = $commentEnd + 2; // loop's $i++ steps past the closing '>'
+                    continue;
+                }
+
+                // Skip over quoted strings so a bracket or '>' inside them is not counted.
+                if ($char === '"' || $char === "'") {
+                    $stringEnd = strpos($dirty, $char, $i + 1);
+                    if ($stringEnd === false) {
+                        $i = $length;
+                        break;
+                    }
+                    $i = $stringEnd; // loop's $i++ steps past the closing quote
+                    continue;
+                }
+
                 if ($char === '[') {
                     $depth++;
                 } elseif ($char === ']') {
@@ -397,10 +420,7 @@ class Sanitizer
                 // The text content of <style> is never otherwise inspected, so remote
                 // CSS references would pass straight through.
                 if (strtolower($currentElement->tagName) === 'style' && $this->removeRemoteReferences) {
-                    $css = $currentElement->textContent;
-                    $css = preg_replace('~@import\b[^;]*;?~i', '', $css);
-                    $css = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $css);
-                    $currentElement->textContent = $css;
+                    $currentElement->textContent = $this->stripRemoteCssReferences($currentElement->textContent);
                 }
 
                 $this->cleanHrefs( $currentElement );
@@ -681,6 +701,101 @@ class Sanitizer
         $value = $this->removeNonPrintableCharacters($value);
 
         return (bool) preg_match('~^\s*(?:(?:https?|ftp|file):)?//~i', $value);
+    }
+
+    /**
+     * Strip remote @import / url() references from CSS text (used for inline
+     * <style> content when removeRemoteReferences is enabled).
+     *
+     * CSS escapes and comments are resolved first so obfuscated remote references
+     * (e.g. `\75 rl(` or `@\69 mport`) cannot hide from the token match. This is a
+     * best-effort measure: a regex-based stripper cannot see through every possible
+     * CSS obfuscation, so untrusted CSS should still be isolated at the embedding
+     * boundary.
+     *
+     * @param string $css
+     * @return string
+     */
+    protected function stripRemoteCssReferences($css)
+    {
+        $normalized = $this->normalizeCss($css);
+
+        // Only rewrite from the normalized form when obfuscation was used to hide a
+        // remote reference; otherwise strip the original as-is so that legitimate
+        // escaped CSS is preserved untouched.
+        $source = ($normalized !== $css && $this->hasRemoteReference($normalized)) ? $normalized : $css;
+
+        $source = preg_replace('~@import\b[^;]*;?~i', '', $source);
+        $source = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $source);
+
+        return $source;
+    }
+
+    /**
+     * Resolve CSS escapes and comments so obfuscated tokens can be matched.
+     *
+     * @param string $css
+     * @return string
+     */
+    protected function normalizeCss($css)
+    {
+        $css = $this->decodeCssEscapes($css);
+        // Replace comments with a space so they can neither glue nor split tokens.
+        $css = preg_replace('~/\*.*?\*/~s', ' ', $css);
+
+        return $css;
+    }
+
+    /**
+     * Decode CSS escape sequences (`\XX` hex escapes and `\c` literal escapes)
+     * into the characters they represent.
+     *
+     * @param string $css
+     * @return string
+     */
+    protected function decodeCssEscapes($css)
+    {
+        return preg_replace_callback(
+            '~\\\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\\\(.)~s',
+            function ($matches) {
+                if ($matches[1] !== '') {
+                    $codepoint = hexdec($matches[1]);
+                    if ($codepoint === 0 || $codepoint > 0x10FFFF) {
+                        return "\xEF\xBF\xBD"; // U+FFFD replacement character
+                    }
+                    return $this->codepointToUtf8($codepoint);
+                }
+                return $matches[2];
+            },
+            $css
+        );
+    }
+
+    /**
+     * Encode a Unicode code point as a UTF-8 byte sequence (avoids an mbstring
+     * dependency, which the library does not otherwise require).
+     *
+     * @param int $codepoint
+     * @return string
+     */
+    protected function codepointToUtf8($codepoint)
+    {
+        if ($codepoint < 0x80) {
+            return chr($codepoint);
+        }
+        if ($codepoint < 0x800) {
+            return chr(0xC0 | ($codepoint >> 6))
+                . chr(0x80 | ($codepoint & 0x3F));
+        }
+        if ($codepoint < 0x10000) {
+            return chr(0xE0 | ($codepoint >> 12))
+                . chr(0x80 | (($codepoint >> 6) & 0x3F))
+                . chr(0x80 | ($codepoint & 0x3F));
+        }
+        return chr(0xF0 | ($codepoint >> 18))
+            . chr(0x80 | (($codepoint >> 12) & 0x3F))
+            . chr(0x80 | (($codepoint >> 6) & 0x3F))
+            . chr(0x80 | ($codepoint & 0x3F));
     }
 
     /**

@@ -590,4 +590,123 @@ class SanitizerTest extends TestCase
             }
         }
     }
+
+    /**
+     * Issue 3 follow-up: a remote url() hidden behind CSS escapes ("\75 rl(")
+     * inside a <style> element must still be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsEscapedRemoteUrlInStyleElement()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:\\75 rl(https://evil.com/track)}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'escape-obfuscated remote url() should be removed');
+    }
+
+    /**
+     * Issue 3 follow-up: an escaped @import ("@\69 mport") inside a <style>
+     * element must still be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsEscapedRemoteImportInStyleElement()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>@\\69 mport "https://evil.com/track";</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'escape-obfuscated @import should be removed');
+    }
+
+    /**
+     * Issue 3 follow-up: a remote reference hidden behind a CSS comment inside a
+     * <style> element must still be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsCommentObfuscatedRemoteImport()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>@import/* x */url(https://evil.com/track);</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'comment-obfuscated remote reference should be removed');
+    }
+
+    /**
+     * Regression: legitimate escaped CSS in a <style> block with no remote
+     * reference must be preserved untouched under removeRemoteReferences(true).
+     *
+     * @test
+     */
+    public function removeRemoteReferencesPreservesLegitimateEscapedCss()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>.foo\\:bar{color:red}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false !== strpos($clean, 'color:red'), 'legitimate CSS should be preserved');
+        self::assertTrue(false !== strpos($clean, 'foo\\:bar'), 'escaped selector should be preserved untouched');
+    }
+
+    /**
+     * removeDoctype() must fully strip the DTD even when a "]" appears inside a
+     * DTD comment, so no internal-subset fragment leaks past the parser.
+     *
+     * @test
+     */
+    public function doctypeWithBracketInCommentIsFullyStripped()
+    {
+        $svg = "<!DOCTYPE svg [ <!-- ] --> <!ENTITY x \"y\"> ]>\n"
+            . '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean), 'document should remain valid after a full DTD strip');
+        self::assertTrue(false !== strpos($clean, '<rect'), 'body should survive');
+        self::assertTrue(false === stripos($clean, '<!ENTITY'), 'no DTD fragment should leak');
+    }
+
+    /**
+     * removeDoctype() must fully strip the DTD even when a "]" appears inside an
+     * entity value string.
+     *
+     * @test
+     */
+    public function doctypeWithBracketInEntityValueIsFullyStripped()
+    {
+        $svg = "<!DOCTYPE svg [ <!ENTITY x \"a]b\"> ]>\n"
+            . '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean), 'document should remain valid after a full DTD strip');
+        self::assertTrue(false !== strpos($clean, '<rect'), 'body should survive');
+        self::assertTrue(false === stripos($clean, '<!ENTITY'), 'no DTD fragment should leak');
+    }
 }
