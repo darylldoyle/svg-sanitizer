@@ -21,7 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   of `image-set()` / `-webkit-image-set()` is covered. This remains best-effort —
   a regex-based stripper cannot see through every CSS construct (the bare-string
   forms of `image()` / `src()` are not handled), so untrusted CSS should still be
-  isolated at the embedding boundary.
+  isolated at the embedding boundary. Unclosed `url(` / `image-set(` (which a CSS
+  tokenizer closes implicitly and still fetches) are stripped too. Note: when a
+  `<style>` / `style` block contains a stripped remote reference, its CSS escapes
+  are normalised (decoded) in the output — semantically equivalent, but it
+  rewrites author escapes in that block.
 - Harden DTD stripping to skip comments and quoted strings while scanning the
   internal subset, so a `]` inside a DTD comment or entity value can no longer
   truncate the scan early and leave a DTD fragment behind. The `DOCTYPE` is now

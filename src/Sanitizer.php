@@ -725,6 +725,10 @@ class Sanitizer
      * (the bare-string forms of image()/src() are not handled, for instance), so
      * untrusted CSS should still be isolated at the embedding boundary.
      *
+     * When a block does contain a stripped remote reference, its CSS escapes are
+     * normalised (decoded) in the output; any benign escapes in that same block are
+     * rewritten to their decoded equivalents (semantically identical).
+     *
      * @param string $css
      * @return string
      */
@@ -751,10 +755,14 @@ class Sanitizer
      */
     protected function stripRemoteCssTokens($css)
     {
-        $css = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $css);
+        // Terminate on ')' when present, or on the rule/line boundary ('}', CR, LF)
+        // or end of input otherwise. A CSS tokenizer closes an unclosed url()/
+        // function token implicitly and still fetches, so requiring a closing paren
+        // would let a value that omits it slip past.
+        $css = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)}\r\n]*\)?~i', '', $css);
         $css = preg_replace('~@import\b[^;]*;?~i', '', $css);
         // image-set() accepts a bare remote string with no url() token of its own.
-        $css = preg_replace('~(?:-webkit-)?image-set\s*\([^)]*[\'"]\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $css);
+        $css = preg_replace('~(?:-webkit-)?image-set\s*\([^)}\r\n]*[\'"]\s*(?:(?:https?|ftp|file):)?//[^)}\r\n]*\)?~i', '', $css);
 
         return $css;
     }

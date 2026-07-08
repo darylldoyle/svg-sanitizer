@@ -845,4 +845,107 @@ class SanitizerTest extends TestCase
         self::assertTrue(is_string($clean));
         self::assertTrue(false !== strpos($clean, 'fill:\\72 ed'), 'legitimate escaped style attribute should be preserved');
     }
+
+    /**
+     * Issue 3 follow-up: an unclosed url( inside a <style> element (the token is
+     * closed implicitly at } / end-of-stylesheet by a CSS tokenizer, and still
+     * fetches) must be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsUnclosedRemoteUrlInStyleElement()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:url(https://evil.com/track}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'unclosed remote url() should be removed');
+    }
+
+    /**
+     * Issue 3 follow-up: an unclosed image-set( inside a <style> element must be
+     * stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsUnclosedRemoteImageSetInStyleElement()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:image-set("https://evil.com/track" 1x}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'unclosed remote image-set() should be removed');
+    }
+
+    /**
+     * Regression: stripping an unclosed remote url() must not eat a following rule.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesKeepsRuleAfterUnclosedRemoteUrl()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:url(https://evil.com/track} y{color:red}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'unclosed remote url() should be removed');
+        self::assertTrue(false !== strpos($clean, 'color:red'), 'a following rule should be preserved');
+    }
+
+    /**
+     * Regression (reporter edge case): a declaration trailing an unclosed url()
+     * within the same rule is folded into the stripped URL (as a CSS tokenizer
+     * would), while a declaration before the url() is preserved.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsUnclosedRemoteUrlFollowedByDeclaration()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{color:red;background:url(https://evil.com/track;text-align:left}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'unclosed remote url() should be removed');
+        self::assertTrue(false !== strpos($clean, 'color:red'), 'a declaration before the url() should be preserved');
+    }
+
+    /**
+     * Regression: a closed remote url() with a ';' in its query string must still
+     * be fully stripped (guards the rule-boundary change).
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsClosedRemoteUrlWithSemicolon()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:url(https://evil.com/x?a=1;b=2)}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'closed remote url() with a semicolon should be removed');
+    }
 }
