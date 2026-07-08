@@ -14,11 +14,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and DTD-defaulted attributes from ever reaching the XML parser.
 - Broaden the remote-reference detection used by `removeRemoteReferences(true)`
   so previously-missed remote references are stripped.
-- Resolve CSS escapes and comments in inline `<style>` content before stripping
-  remote references, so escape-/comment-obfuscated references (e.g. `\75 rl(…)`
-  or `@\69 mport "…"`) are also removed. This remains best-effort — a regex-based
-  stripper cannot see through every CSS obfuscation, so untrusted CSS should still
-  be isolated at the embedding boundary.
+- Strip remote references from inline `<style>` content more thoroughly under
+  `removeRemoteReferences(true)`: CSS escapes and comments are resolved before
+  matching (so `\75 rl(…)` or `@\69 mport "…"` cannot hide), escaped or
+  whitespace-separated `@import` is handled, and the bare-string form of
+  `image-set()` / `-webkit-image-set()` is covered. This remains best-effort — a
+  regex-based stripper cannot see through every CSS construct (the bare-string
+  forms of `image()` / `src()` are not handled), so untrusted CSS should still be
+  isolated at the embedding boundary.
 - Harden DTD stripping to skip comments and quoted strings while scanning the
   internal subset, so a `]` inside a DTD comment or entity value can no longer
   truncate the scan early and leave a DTD fragment behind. The `DOCTYPE` is now

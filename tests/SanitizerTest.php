@@ -709,4 +709,83 @@ class SanitizerTest extends TestCase
         self::assertTrue(false !== strpos($clean, '<rect'), 'body should survive');
         self::assertTrue(false === stripos($clean, '<!ENTITY'), 'no DTD fragment should leak');
     }
+
+    /**
+     * Issue 3 follow-up: an escaped @import whose keyword and value are separated
+     * by whitespace (which the detector strips) must still be removed.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsEscapedImportWithWhitespaceSeparator()
+    {
+        $svg = "<svg xmlns=\"http://www.w3.org/2000/svg\">"
+            . "<style>@\\69 mport\n\"https://evil.com/track\";</style>"
+            . "<rect width=\"1\" height=\"1\"/></svg>";
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'escaped @import with a newline separator should be removed');
+    }
+
+    /**
+     * Issue 3 follow-up: image-set() can take a bare remote string (no url()
+     * token), so a remote reference inside it must be stripped.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsRemoteImageSet()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:image-set("https://evil.com/track" 1x)}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'remote image-set() should be removed');
+    }
+
+    /**
+     * Issue 3 follow-up: the -webkit-image-set() prefixed form must be stripped too.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsRemoteWebkitImageSet()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:-webkit-image-set("https://evil.com/track" 1x)}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'remote -webkit-image-set() should be removed');
+    }
+
+    /**
+     * Regression: a local image-set() (no remote target) must be preserved.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesKeepsLocalImageSet()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:image-set("/local/a.png" 1x)}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false !== strpos($clean, 'image-set'), 'local image-set() should be kept');
+        self::assertTrue(false !== strpos($clean, '/local/a.png'), 'local image-set() target should be kept');
+    }
 }

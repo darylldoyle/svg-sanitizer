@@ -705,14 +705,14 @@ class Sanitizer
     }
 
     /**
-     * Strip remote @import / url() references from CSS text (used for inline
-     * <style> content when removeRemoteReferences is enabled).
+     * Strip remote references (url(), @import, image-set()) from CSS text, used for
+     * inline <style> content when removeRemoteReferences is enabled.
      *
-     * CSS escapes and comments are resolved first so obfuscated remote references
-     * (e.g. `\75 rl(` or `@\69 mport`) cannot hide from the token match. This is a
-     * best-effort measure: a regex-based stripper cannot see through every possible
-     * CSS obfuscation, so untrusted CSS should still be isolated at the embedding
-     * boundary.
+     * CSS escapes and comments are resolved first so obfuscated references (e.g.
+     * `\75 rl(` or `@\69 mport`) cannot hide from the token match. This remains
+     * best-effort: a regex-based stripper cannot see through every CSS construct
+     * (the bare-string forms of image()/src() are not handled, for instance), so
+     * untrusted CSS should still be isolated at the embedding boundary.
      *
      * @param string $css
      * @return string
@@ -720,16 +720,32 @@ class Sanitizer
     protected function stripRemoteCssReferences($css)
     {
         $normalized = $this->normalizeCss($css);
+        $strippedNormalized = $this->stripRemoteCssTokens($normalized);
 
-        // Only rewrite from the normalized form when obfuscation was used to hide a
-        // remote reference; otherwise strip the original as-is so that legitimate
-        // escaped CSS is preserved untouched.
-        $source = ($normalized !== $css && $this->hasRemoteReference($normalized)) ? $normalized : $css;
+        // If decoding escapes/comments exposed a remote reference that the raw text
+        // hides, keep the normalized (and stripped) result. Otherwise strip the
+        // original in place, leaving legitimate escaped CSS untouched.
+        if ($strippedNormalized !== $normalized && $normalized !== $css) {
+            return $strippedNormalized;
+        }
 
-        $source = preg_replace('~@import\b[^;]*;?~i', '', $source);
-        $source = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $source);
+        return $this->stripRemoteCssTokens($css);
+    }
 
-        return $source;
+    /**
+     * Remove the CSS constructs that can trigger a remote fetch.
+     *
+     * @param string $css
+     * @return string
+     */
+    protected function stripRemoteCssTokens($css)
+    {
+        $css = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $css);
+        $css = preg_replace('~@import\b[^;]*;?~i', '', $css);
+        // image-set() accepts a bare remote string with no url() token of its own.
+        $css = preg_replace('~(?:-webkit-)?image-set\s*\([^)]*[\'"]\s*(?:(?:https?|ftp|file):)?//[^)]*\)~i', '', $css);
+
+        return $css;
     }
 
     /**
