@@ -520,9 +520,20 @@ class Sanitizer
             if($this->removeRemoteReferences) {
                 $attr = $element->attributes->item($x);
                 $value = ($attr !== null && isset($attr->value)) ? $attr->value : '';
-                // Remove attribute if it embeds a remote url()/@import reference, or
-                // if the value is itself a remote URL (e.g. a bare href/src).
-                if ($this->hasRemoteReference($value) || $this->isRemoteUrl($value)) {
+
+                // A remote url()/@import reference, or a value that is itself a remote
+                // URL (e.g. a bare href/src).
+                $isRemote = $this->hasRemoteReference($value) || $this->isRemoteUrl($value);
+
+                // The style attribute is CSS, so resolve escapes/comments and reuse the
+                // same remote-token detection used for <style> elements (this also
+                // catches image-set() and escape-obfuscated references).
+                if (!$isRemote && strtolower($attrName) === 'style') {
+                    $normalized = $this->normalizeCss($value);
+                    $isRemote = $this->stripRemoteCssTokens($normalized) !== $normalized;
+                }
+
+                if ($isRemote) {
                     $element->removeAttribute($attrName);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',

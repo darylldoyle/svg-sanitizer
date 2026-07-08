@@ -788,4 +788,61 @@ class SanitizerTest extends TestCase
         self::assertTrue(false !== strpos($clean, 'image-set'), 'local image-set() should be kept');
         self::assertTrue(false !== strpos($clean, '/local/a.png'), 'local image-set() target should be kept');
     }
+
+    /**
+     * Issue 3 follow-up: an escaped url() inside a style *attribute* (CSS) must be
+     * stripped, just like inside a <style> element.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsEscapedUrlInStyleAttribute()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<rect style="background:\\75 rl(https://evil.com/track)" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'escaped url() in a style attribute should be removed');
+    }
+
+    /**
+     * Issue 3 follow-up: a remote image-set() inside a style attribute must be
+     * stripped too.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsImageSetInStyleAttribute()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<rect style="background:image-set(&apos;https://evil.com/track&apos; 1x)" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.com'), 'remote image-set() in a style attribute should be removed');
+    }
+
+    /**
+     * Regression: a legitimate escaped style attribute with no remote reference
+     * must be preserved.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesKeepsLegitimateEscapedStyleAttribute()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<rect style="fill:\\72 ed" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false !== strpos($clean, 'fill:\\72 ed'), 'legitimate escaped style attribute should be preserved');
+    }
 }

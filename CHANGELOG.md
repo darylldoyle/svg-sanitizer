@@ -14,12 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and DTD-defaulted attributes from ever reaching the XML parser.
 - Broaden the remote-reference detection used by `removeRemoteReferences(true)`
   so previously-missed remote references are stripped.
-- Strip remote references from inline `<style>` content more thoroughly under
-  `removeRemoteReferences(true)`: CSS escapes and comments are resolved before
-  matching (so `\75 rl(…)` or `@\69 mport "…"` cannot hide), escaped or
-  whitespace-separated `@import` is handled, and the bare-string form of
-  `image-set()` / `-webkit-image-set()` is covered. This remains best-effort — a
-  regex-based stripper cannot see through every CSS construct (the bare-string
+- Strip remote references from inline `<style>` content and `style` attributes
+  more thoroughly under `removeRemoteReferences(true)`: CSS escapes and comments
+  are resolved before matching (so `\75 rl(…)` or `@\69 mport "…"` cannot hide),
+  escaped or whitespace-separated `@import` is handled, and the bare-string form
+  of `image-set()` / `-webkit-image-set()` is covered. This remains best-effort —
+  a regex-based stripper cannot see through every CSS construct (the bare-string
   forms of `image()` / `src()` are not handled), so untrusted CSS should still be
   isolated at the embedding boundary.
 - Harden DTD stripping to skip comments and quoted strings while scanning the
