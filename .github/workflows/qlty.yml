@@ -1,0 +1,36 @@
+name: Code Coverage
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 7.4
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run test suite
+        run: composer run-script test:coverage
+
+      # Secrets aren't exposed to workflows triggered by pull requests from
+      # forks, so skip the upload there rather than fail the build.
+      - name: Upload coverage to Qlty
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: qltysh/qlty-action/coverage@v2
+        with:
+          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          format: clover
+          files: build/logs/clover.xml
