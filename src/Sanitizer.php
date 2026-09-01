@@ -311,12 +311,16 @@ class Sanitizer
      */
     protected function startClean(\DOMNodeList $elements, array $elementsToRemove)
     {
-        // loop through all elements
-        // we do this backwards so we don't skip anything if we delete a node
-        // see comments at: http://php.net/manual/en/class.domnamednodemap.php
-        for ($i = $elements->length - 1; $i >= 0; $i--) {
+        // Iterate over a static snapshot of the list. Calling item($i) on a
+        // live \DOMNodeList while stepping backwards re-walks the underlying
+        // linked list from the start on every call, which makes this loop
+        // O(n²) in the number of child nodes. The snapshot also guarantees
+        // we don't skip any sibling when we delete a node.
+        $currentElements = iterator_to_array($elements, false);
+
+        for ($i = count($currentElements) - 1; $i >= 0; $i--) {
             /** @var \DOMElement $currentElement */
-            $currentElement = $elements->item($i);
+            $currentElement = $currentElements[$i];
 
             /**
              * If the element has exceeded the nesting limit, we should remove it.
@@ -367,12 +371,10 @@ class Sanitizer
                 // Strip out font elements that will break out of foreign content.
                 if (strtolower($currentElement->tagName) === 'font') {
                     $breaksOutOfForeignContent = false;
-                    for ($x = $currentElement->attributes->length - 1; $x >= 0; $x--) {
-                        // get attribute name
-                        $attrName = $currentElement->attributes->item( $x )->nodeName;
-
-                        if (in_array(strtolower($attrName), ['face', 'color', 'size'])) {
+                    foreach ($currentElement->attributes as $attribute) {
+                        if (in_array(strtolower($attribute->nodeName), ['face', 'color', 'size'])) {
                             $breaksOutOfForeignContent = true;
+                            break;
                         }
                     }
 
@@ -402,9 +404,13 @@ class Sanitizer
      */
     protected function cleanAttributesOnWhitelist(\DOMElement $element)
     {
-        for ($x = $element->attributes->length - 1; $x >= 0; $x--) {
+        // Work on a static snapshot: stepping backwards through the live
+        // \DOMNamedNodeMap via item($x) is O(n²) in the number of attributes.
+        $attributes = iterator_to_array($element->attributes, false);
+
+        for ($x = count($attributes) - 1; $x >= 0; $x--) {
             // get attribute name
-            $attrName = $element->attributes->item($x)->nodeName;
+            $attrName = $attributes[$x]->nodeName;
 
             // Remove attribute if not in whitelist
             if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
@@ -414,6 +420,7 @@ class Sanitizer
                     'message' => 'Suspicious attribute \'' . $attrName . '\'',
                     'line' => $element->getLineNo(),
                 );
+                continue;
             }
 
             /**
@@ -429,13 +436,14 @@ class Sanitizer
                         'message' => 'Suspicious attribute \'href\'',
                         'line'    => $element->getLineNo(),
                     );
+                    continue;
                 }
             }
 
             // Do we want to strip remote references?
             if($this->removeRemoteReferences) {
                 // Remove attribute if it has a remote reference
-                if (isset($element->attributes->item($x)->value) && $this->hasRemoteReference($element->attributes->item($x)->value)) {
+                if (isset($attributes[$x]->value) && $this->hasRemoteReference($attributes[$x]->value)) {
                     $element->removeAttribute($attrName);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',
@@ -719,10 +727,13 @@ class Sanitizer
             return;
         }
 
-        if ( $currentElement->childNodes && $currentElement->childNodes->length > 0 ) {
-            for ($j = $currentElement->childNodes->length - 1; $j >= 0; $j--) {
+        if ($currentElement->hasChildNodes()) {
+            // Same as in startClean(): work on a static snapshot, stepping
+            // backwards through a live \DOMNodeList via item($j) is O(n²).
+            $childNodes = iterator_to_array($currentElement->childNodes, false);
+            for ($j = count($childNodes) - 1; $j >= 0; $j--) {
                 /** @var \DOMElement $childElement */
-                $childElement = $currentElement->childNodes->item($j);
+                $childElement = $childNodes[$j];
                 $this->cleanUnsafeNodes($childElement);
             }
         }
