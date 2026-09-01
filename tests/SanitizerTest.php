@@ -348,7 +348,10 @@ class SanitizerTest extends TestCase
         $sanitizer->minify(false);
         $cleanData = $sanitizer->sanitize($initialData);
 
-        self::assertStringNotContainsString('<use', $cleanData);
+        // Plain string/regex checks rather than PHPUnit's string constraints: the
+        // matrix runs PHPUnit 6.5 on PHP 7.1 and 8.5 everywhere else, and the
+        // relevant assertions do not exist across that whole range.
+        self::assertSame(0, substr_count($cleanData, '<use'));
         self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
@@ -400,7 +403,7 @@ class SanitizerTest extends TestCase
         $sanitizer->minify(false);
         $cleanData = $sanitizer->sanitize($initialData);
 
-        self::assertNotRegExp('/<use[^>]*href/i', $cleanData);
+        self::assertSame(0, preg_match('/<use[^>]*href/i', $cleanData));
     }
 
     public function testInvalidNodesAreHandled()
