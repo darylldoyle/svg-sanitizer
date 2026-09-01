@@ -308,6 +308,101 @@ class SanitizerTest extends TestCase
         self::assertXmlStringEqualsXmlString($expected, $cleanData);
     }
 
+    /**
+     * Attribute names that `Sanitizer::cleanHrefAttributes()` normalizes, paired with
+     * the canonical name they are normalized to.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function mixedCaseHrefAttributeNameDataProvider()
+    {
+        return [
+            'xlink:HrEf' => ['xlink:HrEf', 'xlink:href'],
+            'xlink:HREF' => ['xlink:HREF', 'xlink:href'],
+            'href' => ['href', 'href'],
+            'HrEf' => ['HrEf', 'href'],
+            'HREF' => ['HREF', 'href'],
+        ];
+    }
+
+    /**
+     * The `<use>` reference graph is built before `cleanHrefAttributes()` normalizes
+     * names such as `xlink:HrEf` back to `xlink:href`. Selecting the referencing
+     * elements case sensitively therefore used to hide the whole nesting bomb from
+     * the graph, and the sanitizer handed it back intact with canonical attributes.
+     *
+     * @test
+     * @dataProvider mixedCaseHrefAttributeNameDataProvider
+     */
+    public function useDOSattacksAreNullifiedForMixedCaseHrefAttributes($attributeName, $canonicalName)
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = str_replace(
+            'xlink:href',
+            $attributeName,
+            file_get_contents($dataDirectory . '/useDosTest.svg')
+        );
+        $expected = file_get_contents($dataDirectory . '/useDosClean.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertStringNotContainsString('<use', $cleanData);
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Same as above for the `useThreshold` machinery, which counts uses on the
+     * very same reference graph.
+     *
+     * @test
+     * @dataProvider mixedCaseHrefAttributeNameDataProvider
+     */
+    public function useRecursionsAreDetectedForMixedCaseHrefAttributes($attributeName, $canonicalName)
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = str_replace(
+            'xlink:href',
+            $attributeName,
+            file_get_contents($dataDirectory . '/xlinkLaughsTest.svg')
+        );
+        $expected = str_replace(
+            'xlink:href',
+            $canonicalName,
+            file_get_contents($dataDirectory . '/xlinkLaughsClean.svg')
+        );
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * A mixed-case *prefix* (`XLINK:href`) is not bound to the xlink namespace, so the
+     * attribute is dropped wholesale by `cleanXlinkHrefs()`. The `<use>` elements survive
+     * as leftovers, but without an href they reference nothing and expand to nothing.
+     *
+     * @test
+     */
+    public function useElementsWithUnboundHrefPrefixLoseTheirReference()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = str_replace(
+            'xlink:href',
+            'XLINK:href',
+            file_get_contents($dataDirectory . '/useDosTest.svg')
+        );
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertNotRegExp('/<use[^>]*href/i', $cleanData);
+    }
+
     public function testInvalidNodesAreHandled()
     {
         $dataDirectory = __DIR__ . '/data';
