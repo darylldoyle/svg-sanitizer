@@ -585,7 +585,7 @@ class Sanitizer
     protected function cleanHrefAttributes(\DOMElement $element, string $prefix = ''): void
     {
         $relevantAttributes = array_filter(
-            iterator_to_array($element->attributes),
+            iterator_to_array($element->attributes, false),
             static function (\DOMAttr $attr) use ($prefix) {
                 return strtolower($attr->name) === 'href' && strtolower($attr->prefix) === $prefix;
             }

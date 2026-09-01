@@ -663,6 +663,51 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * When `href` and `xlink:href` coexist on the same element, both must be
+     * processed by the href cleaning pass: iterating the attribute map by key
+     * collapses them onto the same `href` key, hiding one of the two.
+     *
+     * @test
+     */
+    public function unsafeXlinkHrefIsDetectedWhenPlainHrefCoexists()
+    {
+        $initialData = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<a xlink:href="javascript:alert(1)" href="https://example.com/safe">'
+            . '<text x="10" y="10">x</text></a></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertStringNotContainsString('javascript:', $cleanData);
+        self::assertContains(
+            [
+                'message' => 'Suspicious attribute \'xlink:href\'',
+                'line' => 1,
+            ],
+            $sanitizer->getXmlIssues()
+        );
+    }
+
+    /**
+     * @test
+     */
+    public function mixedCaseHrefIsNormalizedWhenXlinkHrefCoexists()
+    {
+        $initialData = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<a HREF="#safe" xlink:HREF="#safeTwo">'
+            . '<text x="10" y="10">x</text></a></svg>';
+
+        $expected = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<a href="#safe" xlink:href="#safeTwo">'
+            . '<text x="10" y="10">x</text></a></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
      * @test
      */
     public function maliciousSvgPhpTagsStripped()
