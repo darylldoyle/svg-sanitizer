@@ -948,4 +948,24 @@ class SanitizerTest extends TestCase
         self::assertTrue(is_string($clean));
         self::assertTrue(false === strpos($clean, 'evil.com'), 'closed remote url() with a semicolon should be removed');
     }
+
+
+    /**
+     * Test that disallowed nodes interleaved in an element-dense document
+     * are all removed and that no sibling gets skipped along the way.
+     */
+    public function testSanitizeElementDenseSVG()
+    {
+        $count = 500;
+        $initialData = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . str_repeat('<rect x="1" y="1" width="2" height="2"/><script>alert(1)</script>', $count)
+            . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertSame($count, substr_count($cleanData, '<rect'));
+        self::assertSame(0, substr_count($cleanData, '<script'));
+        self::assertCount($count, $sanitizer->getXmlIssues());
+    }
 }
