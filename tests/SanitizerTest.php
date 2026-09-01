@@ -678,7 +678,7 @@ class SanitizerTest extends TestCase
         $sanitizer = new Sanitizer();
         $cleanData = $sanitizer->sanitize($initialData);
 
-        self::assertStringNotContainsString('javascript:', $cleanData);
+        self::assertTrue(false === strpos($cleanData, 'javascript:'), 'payload must not survive');
         self::assertContains(
             [
                 'message' => 'Suspicious attribute \'xlink:href\'',
