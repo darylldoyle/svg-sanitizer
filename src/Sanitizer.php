@@ -92,8 +92,8 @@ class Sanitizer
     function __construct()
     {
         // Load default tags/attributes
-        $this->allowedAttrs = array_map('strtolower', AllowedAttributes::getAttributes());
-        $this->allowedTags = array_map('strtolower', AllowedTags::getTags());
+        $this->allowedAttrs = array_fill_keys(array_map('strtolower', AllowedAttributes::getAttributes()), true);
+        $this->allowedTags = array_fill_keys(array_map('strtolower', AllowedTags::getTags()), true);
     }
 
     /**
@@ -136,7 +136,7 @@ class Sanitizer
      */
     public function getAllowedTags()
     {
-        return $this->allowedTags;
+        return array_keys($this->allowedTags);
     }
 
     /**
@@ -146,7 +146,7 @@ class Sanitizer
      */
     public function setAllowedTags(TagInterface $allowedTags)
     {
-        $this->allowedTags = array_map('strtolower', $allowedTags::getTags());
+        $this->allowedTags = array_fill_keys(array_map('strtolower', $allowedTags::getTags()), true);
     }
 
     /**
@@ -156,7 +156,7 @@ class Sanitizer
      */
     public function getAllowedAttrs()
     {
-        return $this->allowedAttrs;
+        return array_keys($this->allowedAttrs);
     }
 
     /**
@@ -166,7 +166,7 @@ class Sanitizer
      */
     public function setAllowedAttrs(AttributeInterface $allowedAttrs)
     {
-        $this->allowedAttrs = array_map('strtolower', $allowedAttrs::getAttributes());
+        $this->allowedAttrs = array_fill_keys(array_map('strtolower', $allowedAttrs::getAttributes()), true);
     }
 
     /**
@@ -412,10 +412,10 @@ class Sanitizer
 
             if ($currentElement instanceof \DOMElement) {
                 // If the tag isn't in the whitelist, remove it and continue with next iteration
-                if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
+                if (!isset($this->allowedTags[strtolower($currentElement->tagName)])) {
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
-                        'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
+                        'message' => "Suspicious tag '" . $currentElement->tagName . "'",
                         'line' => $currentElement->getLineNo(),
                     );
                     continue;
@@ -490,13 +490,14 @@ class Sanitizer
         for ($x = count($attributes) - 1; $x >= 0; $x--) {
             // get attribute name
             $attrName = $attributes[$x]->nodeName;
+            $lowerAttrName = strtolower($attrName);
 
             // Remove attribute if not in whitelist
-            if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
+            if (!isset($this->allowedAttrs[$lowerAttrName]) && !$this->isAriaAttribute($lowerAttrName) && !$this->isDataAttribute($lowerAttrName)) {
 
                 $element->removeAttribute($attrName);
                 $this->xmlIssues[] = array(
-                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                    'message' => "Suspicious attribute '" . $attrName . "'",
                     'line' => $element->getLineNo(),
                 );
 
@@ -600,9 +601,7 @@ class Sanitizer
                 continue;
             }
             // in case the attribute name is `HrEf`/`xlink:HrEf`, adjust it to `href`/`xlink:href`
-            if (!in_array($attribute->nodeName, $this->allowedAttrs, true)
-                && in_array(strtolower($attribute->nodeName), $this->allowedAttrs, true)
-            ) {
+            if (!isset($this->allowedAttrs[$attribute->nodeName]) && isset($this->allowedAttrs[strtolower($attribute->nodeName)])) {
                 $element->removeAttribute($attribute->nodeName);
                 $element->setAttribute(strtolower($attribute->nodeName), $attribute->value);
             }
