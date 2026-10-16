@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="120" viewBox="0 0 1000 120">
+  <a id="target" href="#safe">
+    <text x="20" y="55" font-size="26">Wait one second, then click</text>
+    <animateTransform type="invalid" values="XXX;javascript:alert(1)//" begin="0s" dur="0.1s" fill="freeze"></animateTransform>
+  </a>
+  <a id="targetTwo" xlink:href="#safe">
+    <animateTransform type="invalid" values="XXX;javascript:alert(2)//" dur="0.1s" fill="freeze"></animateTransform>
+  </a>
+  <a id="targetThree" href="#safe">
+    <animateMotion values="XXX;javascript:alert(3)//" dur="0.1s" fill="freeze"></animateMotion>
+    <animateColor values="XXX;javascript:alert(4)//" dur="0.1s" fill="freeze"></animateColor>
+    <animateTransform by="javascript:alert(5)//" dur="0.1s" fill="freeze"></animateTransform>
+  </a>
+  <rect x="0" y="0" width="10" height="10">
+    <animateTransform attributeName="transform" type="rotate" values="0;360" dur="2s" repeatCount="indefinite"></animateTransform>
+  </rect>
+</svg>

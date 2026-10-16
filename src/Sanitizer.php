@@ -507,6 +507,29 @@ class Sanitizer
             }
 
             /**
+             * SMIL animation elements can rewrite an attribute at runtime, so an
+             * `href` that looked safe when we validated it can be animated into a
+             * `javascript:` URI afterwards. Safari only requires the target to be
+             * animatable (not transform-specific), so even `<animateTransform>`
+             * can retarget `href`/`xlink:href` via `values`/`by`.
+             *
+             * Drop the targeting attribute so the animation has nothing to animate.
+             * Matched case-insensitively on a substring so `xlink:href`, `HrEf` and
+             * padded values are all covered.
+             */
+            if ('attributename' === strtolower($attrName)
+                && false !== stripos($element->getAttribute($attrName), 'href')
+            ) {
+                $element->removeAttribute($attrName);
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                    'line'    => $element->getLineNo(),
+                );
+
+                continue;
+            }
+
+            /**
              * This is used for when a namespace isn't imported properly.
              * Such as xlink:href when the xlink namespace isn't imported.
              * We have to do this as the link is still ran in this case.

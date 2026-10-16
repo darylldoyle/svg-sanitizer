@@ -663,6 +663,70 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * SMIL animation elements can retarget an already-validated `href` at runtime.
+     * Safari only requires the animation target to be animatable rather than
+     * transform-specific, so `<animateTransform attributeName="href">` can turn a
+     * safe link into a `javascript:` URI via `values`/`by`. Any animation whose
+     * target is href-like must lose its `attributeName`, while ordinary animations
+     * are left alone.
+     *
+     * @test
+     */
+    public function animatedHrefIsSanitized()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/animatedHrefTest.svg');
+        $expected = file_get_contents($dataDirectory . '/animatedHrefClean.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * The animated-href check must not fire on a legitimate animation, and must
+     * still fire when the target is obfuscated by case or padding.
+     *
+     * @test
+     */
+    public function animatedHrefTargetsAreMatchedLoosely()
+    {
+        $cases = array(
+            'href'        => false,
+            'xlink:href'  => false,
+            'HrEf'        => false,
+            ' href '      => false,
+            'XLINK:HREF'  => false,
+            'transform'   => true,
+            'opacity'     => true,
+            'fill'        => true,
+        );
+
+        foreach ($cases as $target => $shouldSurvive) {
+            $initialData = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+                . '<a href="#safe"><animateTransform attributeName="' . $target . '" type="invalid"'
+                . ' values="XXX;javascript:alert(1)//" dur="0.1s" fill="freeze"/></a></svg>';
+
+            $sanitizer = new Sanitizer();
+            $cleanData = $sanitizer->sanitize($initialData);
+
+            if ($shouldSurvive) {
+                self::assertTrue(
+                    false !== strpos($cleanData, 'attributeName="' . $target . '"'),
+                    sprintf('legitimate animation of \'%s\' must be preserved', $target)
+                );
+            } else {
+                self::assertTrue(
+                    false === strpos($cleanData, 'attributeName'),
+                    sprintf('animation targeting \'%s\' must lose its attributeName', $target)
+                );
+            }
+        }
+    }
+
+    /**
      * When `href` and `xlink:href` coexist on the same element, both must be
      * processed by the href cleaning pass: iterating the attribute map by key
      * collapses them onto the same `href` key, hiding one of the two.
