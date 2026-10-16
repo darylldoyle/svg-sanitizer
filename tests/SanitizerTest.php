@@ -2371,6 +2371,177 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * The URL parser trims spaces and control characters from both ends of an
+     * href and drops tabs and line breaks anywhere, so `#a ` and `#&#10;a`
+     * both reach the element with id `a`. The graph must read them the same way.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function whitespaceFragmentDataProvider()
+    {
+        return [
+            'trailing space' => ['#a '],
+            'leading space' => [' #a'],
+            'trailing tab' => ['#a&#9;'],
+            'trailing CR' => ['#a&#13;'],
+            'newline inside' => ['#&#10;a'],
+            'tab inside' => ['#&#9;a'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider whitespaceFragmentDataProvider
+     */
+    public function useFragmentsWithUrlWhitespaceReachTheSameTarget($href)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" href="' . $href . '"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(self::outerUseSurvivesWithTwoLiveReferences($cleanData), 'the outer <use> must not survive with two live references below it');
+    }
+
+    /**
+     * The same gap at full scale: a billion-laughs chain whose references all
+     * end in a space.
+     *
+     * @test
+     */
+    public function billionLaughsWithTrailingSpacesIsStopped()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="a0"><rect width="1" height="1"/></g>';
+        for ($level = 1; $level <= 9; $level++) {
+            $svg .= '<g id="a' . $level . '">' . str_repeat('<use href="#a' . ($level - 1) . ' "/>', 10) . '</g>';
+        }
+        $svg .= '<use href="#a9 "/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * Renaming `XLINK:href` to `xlink:href` must keep it in the XLink namespace.
+     * When only a prefix like `XLINK` is bound, setAttribute('xlink:href') made
+     * an attribute in no namespace, which the graph cannot see but an HTML
+     * parser reads as XLink.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function unboundXlinkSpellingDataProvider()
+    {
+        return [
+            'XLINK:href' => ['XLINK', 'XLINK:href'],
+            'Xlink:HREF' => ['Xlink', 'Xlink:HREF'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider unboundXlinkSpellingDataProvider
+     */
+    public function renamedXlinkHrefStaysInTheXlinkNamespace($prefix, $attribute)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:' . $prefix . '="http://www.w3.org/1999/xlink">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" ' . $attribute . '="#a"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(self::outerUseSurvivesWithTwoLiveReferences($cleanData), 'the outer <use> must not survive with two live references below it');
+
+        $document = new \DOMDocument();
+        self::assertTrue($document->loadXML($cleanData), 'the output must stay well-formed XML');
+    }
+
+    /**
+     * More ways a remote `image-set()` URL got past removeRemoteReferences(true):
+     * a comment holding `)`, a `{}` block inside a var() fallback, and a custom
+     * property carrying the remote string.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function remoteImageSetDataProvider()
+    {
+        return [
+            'comment holding ) after a string holding /*' => ['x{content:"/*"} svg{mask-image:image-set(/* ) */ "https://evil.example/a.png" 1x)}'],
+            '{} block in a var() fallback' => ['svg{--u:"x.png" 2x;mask-image:image-set(var(--u,{}), "https://evil.example/a.png" 1x)}'],
+            'string in a custom property' => ['svg{--u:"https://evil.example/a.png";mask-image:image-set(var(--u) 1x)}'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteImageSetDataProvider
+     */
+    public function remoteImageSetUrlsAreRemovedFromStyleElements($css)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><style>' . $css . '</style></svg>');
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote reference should be removed');
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteImageSetDataProvider
+     */
+    public function remoteImageSetUrlsAreRemovedFromStyleAttributes($css)
+    {
+        $declarations = preg_replace('/^.*?svg\{|\}$/', '', $css);
+        if (strpos($css, 'x{content:"/*"}') === 0) {
+            $declarations = 'content:"/*";' . $declarations;
+        }
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><rect style=\'' . htmlspecialchars($declarations, ENT_QUOTES) . '\'/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote reference should be removed');
+    }
+
+    /**
+     * sanitize() must not raise any notice, including PHP 8.5 deprecations.
+     *
+     * @test
+     */
+    public function sanitizeRaisesNoNotices()
+    {
+        $notices = [];
+        set_error_handler(function ($severity, $message) use (&$notices) {
+            $notices[] = $message;
+
+            return true;
+        });
+
+        try {
+            $sanitizer = new Sanitizer();
+            $cleanData = $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><g id="a"><rect/></g><use href="#a"/></svg>');
+        } finally {
+            restore_error_handler();
+        }
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame([], $notices);
+    }
+
+    /**
      * Encode an ASCII string as UTF-16.
      *
      * @param string $ascii
@@ -2451,17 +2622,26 @@ class SanitizerTest extends TestCase
         $plain = null;
         $xlink = null;
         foreach ($use->attributes as $attribute) {
-            if (strtolower($attribute->localName) !== 'href') {
+            // An attribute literally named `xlink:href` in no namespace is still
+            // XLink to an HTML parser.
+            $isUnboundXlink = strtolower($attribute->nodeName) === 'xlink:href' && (string) $attribute->prefix === '';
+            if (strtolower($attribute->localName) !== 'href' && !$isUnboundXlink) {
                 continue;
             }
-            if ((string) $attribute->prefix === '') {
+            if ((string) $attribute->prefix === '' && !$isUnboundXlink) {
                 $plain = $plain === null ? $attribute->value : $plain;
             } else {
                 $xlink = $xlink === null ? $attribute->value : $xlink;
             }
         }
         $href = $plain !== null ? $plain : $xlink;
-        if ($href === null || strpos($href, '#') !== 0) {
+        if ($href === null) {
+            return null;
+        }
+        // The URL parser trims spaces and control characters from both ends and
+        // drops tabs and line breaks anywhere.
+        $href = str_replace(["\t", "\n", "\r"], '', trim($href, "\x00..\x20"));
+        if (strpos($href, '#') !== 0) {
             return null;
         }
         $id = rawurldecode(substr($href, 1));

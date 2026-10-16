@@ -117,7 +117,8 @@ class Resolver
         // directly inside it (see Subject::addContained()).
         $useElements = new \SplObjectStorage();
         foreach ($this->xPath->query('//' . $this->xPath->createNodeName('use')) as $useElement) {
-            $useElements->attach($useElement);
+            // Array syntax: attach() and contains() are deprecated in PHP 8.5.
+            $useElements[$useElement] = true;
         }
 
         $documentElement = $this->xPath->document->documentElement;
@@ -158,7 +159,7 @@ class Resolver
         // rendering `<use id="u" href="#x">` renders `#x`, so anything that uses
         // `#u` renders `#x` too. Its own id is in $ancestorIds by now, so
         // `<use id="a" href="#a">` counts as a self reference.
-        if ($useElements->contains($element)) {
+        if (isset($useElements[$element])) {
             $this->addReference($element, $nearest, $ancestorIds);
         }
 

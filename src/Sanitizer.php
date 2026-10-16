@@ -889,8 +889,16 @@ class Sanitizer
             ) {
                 $element->removeAttributeNode($attribute);
                 // Never overwrite a correctly spelled attribute: that is the one
-                // the element already follows.
-                if (!$element->hasAttribute($canonicalName)) {
+                // the element already follows. Keep `xlink:href` in the XLink
+                // namespace: when only a prefix like `XLINK` is bound,
+                // setAttribute('xlink:href') would create an attribute in no
+                // namespace, which the `<use>` graph cannot see but an HTML
+                // parser reads as XLink.
+                if ($prefix === 'xlink') {
+                    if (!$element->hasAttributeNS(Helper::XLINK_NAMESPACE_URI, 'href')) {
+                        $element->setAttributeNS(Helper::XLINK_NAMESPACE_URI, 'xlink:href', $attribute->value);
+                    }
+                } elseif (!$element->hasAttribute($canonicalName)) {
                     $element->setAttribute($canonicalName, $attribute->value);
                 }
             }
@@ -1013,14 +1021,14 @@ class Sanitizer
     }
 
     /**
-     * Strip remote references (url(), @import, image-set()) from CSS text, used for
-     * inline <style> content when removeRemoteReferences is enabled.
+     * Strip remote references (url(), @import, image-set() and quoted remote URLs)
+     * from CSS text, used for inline <style> content when removeRemoteReferences
+     * is enabled.
      *
      * CSS escapes and comments are resolved first so obfuscated references (e.g.
      * `\75 rl(` or `@\69 mport`) cannot hide from the token match. This remains
-     * best-effort: a regex-based stripper cannot see through every CSS construct
-     * (the bare-string forms of image()/src() are not handled, for instance), so
-     * untrusted CSS should still be isolated at the embedding boundary.
+     * best-effort: a regex-based stripper does not parse CSS the way a browser
+     * does, so untrusted CSS should still be isolated at the embedding boundary.
      *
      * When a block does contain a stripped remote reference, its CSS escapes are
      * normalised (decoded) in the output; any benign escapes in that same block are
@@ -1091,6 +1099,11 @@ class Sanitizer
         $css = $this->pregReplace('~@import\b[^;]*;?~i', '', $css);
         // image-set() accepts a bare remote string with no url() token of its own.
         $css = $this->stripRemoteImageSets($css);
+        // A quoted remote URL can still reach a fetch from outside image-set(),
+        // for example through a custom property (`--u:"https://…"` used as
+        // `image-set(var(--u) 1x)`), or through image() and src(). Empty every
+        // quoted string that starts with a remote URL.
+        $css = $this->pregReplace('~([\'"])\s*+' . self::REMOTE_URL_START . '(?:[^\'"\\\\\r\n]|\\\\.)*+\1?~is', '$1$1', $css);
 
         return $css;
     }
@@ -1151,9 +1164,9 @@ class Sanitizer
 
     /**
      * Find where a CSS function's arguments end: the offset of the `)` that
-     * closes it, or of a `}` that ends the block first, or the end of the input.
-     * Nested functions, quoted strings and escapes are skipped, so a `)` inside
-     * them does not end the function.
+     * closes it, or the end of the input. Nested functions, `{}` blocks, quoted
+     * strings, comments and escapes are skipped, so a `)` or `}` inside them
+     * does not end the function.
      *
      * @param string $css
      * @param int $from Offset just after the opening `(`
@@ -1165,7 +1178,7 @@ class Sanitizer
         $depth = 1;
 
         for ($i = $from; $i < $length; $i++) {
-            $i += strcspn($css, "()'\"}\\", $i);
+            $i += strcspn($css, "()'\"/\\", $i);
             if ($i >= $length) {
                 break;
             }
@@ -1174,6 +1187,15 @@ class Sanitizer
             if ($char === '\\') {
                 // Skip the escaped character.
                 $i++;
+            } elseif ($char === '/') {
+                // Skip a comment. An unclosed one runs to the end of the input.
+                if (substr($css, $i, 2) === '/*') {
+                    $end = strpos($css, '*/', $i + 2);
+                    if ($end === false) {
+                        return $length;
+                    }
+                    $i = $end + 1;
+                }
             } elseif ($char === '"' || $char === "'") {
                 // Skip to the closing quote. A string also ends at a line break.
                 for ($i++; $i < $length; $i++) {
@@ -1189,9 +1211,6 @@ class Sanitizer
                 if (--$depth === 0) {
                     return $i;
                 }
-            } else {
-                // `}` ends the block, and the function with it.
-                return $i;
             }
         }
 

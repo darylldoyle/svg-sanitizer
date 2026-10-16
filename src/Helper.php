@@ -45,7 +45,14 @@ class Helper
      */
     public static function extractIdReferenceFromHref($href)
     {
-        if (!is_string($href) || strpos($href, '#') !== 0) {
+        if (!is_string($href)) {
+            return null;
+        }
+        // Read the href the way the URL parser does: it trims spaces and control
+        // characters from both ends and drops tabs and line breaks anywhere, so
+        // `#a ` and `#&#10;a` both reach the element with id `a`.
+        $href = str_replace(array("\t", "\n", "\r"), '', trim($href, "\x00..\x20"));
+        if (strpos($href, '#') !== 0) {
             return null;
         }
         // A fragment is percent-decoded before it is matched against ids, so
