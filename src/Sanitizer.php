@@ -315,6 +315,10 @@ class Sanitizer
             return false;
         }
 
+        if ($this->minifyXML) {
+            $this->collapseWhitespace();
+        }
+
         // Fails early (with a LogicException) unless the root is a single <svg>.
         $xPath = new XPath($this->xmlDocument);
 
@@ -338,12 +342,37 @@ class Sanitizer
             $clean = $this->xmlDocument->saveXML($this->xmlDocument, $this->xmlOptions);
         }
 
-        // Remove any extra whitespaces when minifying
+        // Remove any extra whitespaces when minifying. Text and attribute values
+        // were already collapsed before the security checks ran (see
+        // collapseWhitespace()), so this only touches the serializer's own
+        // line breaks and cannot change a value that was checked.
         if ($this->minifyXML) {
             $clean = $this->pregReplace('/\s+/', ' ', $clean);
         }
 
         return $clean;
+    }
+
+    /**
+     * For minify(): collapse every run of whitespace in text, CDATA and
+     * attribute values to one space, in the parsed document.
+     *
+     * This runs before cleaning so the security checks and the `<use>` graph
+     * see the values that will be output. Collapsing the serialized output
+     * afterwards could change a checked value: in CSS a hex escape swallows one
+     * following space, so `url(\2f  /host)` would become `url(\2f /host)`,
+     * which is `url(//host)`, and `id="a  b"` would become `id="a b"`.
+     */
+    protected function collapseWhitespace()
+    {
+        $xPath = new \DOMXPath($this->xmlDocument);
+        foreach ($xPath->query('//text() | //@*') as $node) {
+            $value = $node->nodeValue;
+            $collapsed = $this->pregReplace('/\s+/', ' ', $value);
+            if ($collapsed !== $value) {
+                $node->nodeValue = $collapsed;
+            }
+        }
     }
 
     /**
@@ -589,7 +618,17 @@ class Sanitizer
                 // The text content of <style> is never otherwise inspected, so remote
                 // CSS references would pass straight through.
                 if (strtolower($currentElement->tagName) === 'style' && $this->removeRemoteReferences) {
-                    $currentElement->textContent = $this->stripRemoteCssReferences($currentElement->textContent);
+                    $css = $currentElement->textContent;
+                    $strippedCss = $this->stripRemoteCssReferences($css);
+                    $currentElement->textContent = $strippedCss;
+                    // Report the change, like every other removal, so callers
+                    // (and the CLI scanner) can tell the input was not clean.
+                    if ($strippedCss !== $css) {
+                        $this->xmlIssues[] = array(
+                            'message' => 'Remote reference removed from \'' . $currentElement->tagName . '\'',
+                            'line' => $currentElement->getLineNo(),
+                        );
+                    }
                 }
 
                 $this->cleanHrefs( $currentElement );
@@ -824,7 +863,11 @@ class Sanitizer
                 // escapes that only look like comments.
                 $isRemote = $this->hasRemoteReference($value)
                     || $this->isRemoteUrl($value)
-                    || $this->hasRemoteCssReference($value);
+                    || $this->hasRemoteCssReference($value)
+                    // `srcset` is a list of URLs, so a remote candidate can follow
+                    // a local one. Checking it as one URL misses that, so remove it
+                    // whenever remote references are being removed.
+                    || strtolower($attrName) === 'srcset';
 
                 // The style attribute is CSS, so resolve escapes/comments and reuse the
                 // same remote-token detection used for <style> elements (this also
@@ -856,8 +899,12 @@ class Sanitizer
         // Iterate a snapshot: removing from the live attribute map while walking
         // it skips the attribute after each removal.
         foreach (iterator_to_array($element->attributes, false) as $attribute) {
-            // remove attributes with unexpected namespace prefix, e.g. `XLinK:href` (instead of `xlink:href`)
-            if ($attribute->prefix === '' && strtolower($attribute->nodeName) === 'xlink:href') {
+            // Remove any attribute spelled `xlink:href` that is not in the XLink
+            // namespace: an unbound prefix such as `XLinK:href`, or `xlink` bound
+            // to another namespace. Neither is XLink in XML, so the `<use>` graph
+            // ignores it, but an HTML parser maps the spelling to XLink when the
+            // output is inlined in a page.
+            if (strtolower($attribute->nodeName) === 'xlink:href' && $attribute->namespaceURI !== Helper::XLINK_NAMESPACE_URI) {
                 $element->removeAttributeNode($attribute);
                 $this->xmlIssues[] = array(
                     'message' => sprintf('Unexpected attribute \'%s\'', $attribute->nodeName),

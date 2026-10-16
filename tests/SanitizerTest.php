@@ -2579,6 +2579,225 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * An `href` on a `<g>` does nothing, so `<g id="a" href="#a">` is not a loop.
+     * Treating it as one used to wipe the group's graph edges without removing
+     * anything, which hid the `<use>` chains nested inside it.
+     *
+     * @test
+     */
+    public function inertSelfHrefOnAGroupDoesNotHideUseExpansion()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="L0"><rect width="1" height="1"/></g>';
+        for ($i = 1; $i <= 6; $i++) {
+            $svg .= '<g id="L' . $i . '" href="#L' . $i . '"><g id="C' . $i . '">'
+                . str_repeat('<use href="#L' . ($i - 1) . '"/>', 10) . '</g></g>';
+        }
+        $svg .= '<use href="#L6"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * A loop that runs through an element nested inside another one must still
+     * be broken. Marking the outer element as a loop used to clear its graph
+     * edges without removing the `<use>` that closes the loop.
+     *
+     * @test
+     */
+    public function loopThroughANestedElementIsBroken()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="A"><g id="C"><use href="#B"/></g></g><g id="B"><use href="#A"/></g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) !== INF, 'the loop must be broken');
+    }
+
+    /**
+     * minify(true) collapsed whitespace after every security check had run. In
+     * CSS, a hex escape swallows one following space, so collapsing two spaces
+     * to one rebuilt `url(\2f  /host)` into `url(//host)`.
+     *
+     * @test
+     */
+    public function minifyingCannotRebuildARemoteUrl()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $sanitizer->minify(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><style>a{fill:url(\\2f  /evil.example/x)}</style>'
+            . '<rect style="fill:url(\\2f  /evil.example/y)" width="1" height="1"/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, '\\2f /evil.example'), 'minifying must not turn a local path into a remote URL');
+    }
+
+    /**
+     * minify(true) used to collapse `id="a  b"` into `id="a b"` after the `<use>`
+     * graph was built, which connected a `<use href="#a b">` the graph had
+     * measured as pointing at nothing.
+     *
+     * @test
+     */
+    public function minifyingCannotJoinAnIdToAReference()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="a  b"><use href="#c"/><use href="#c"/></g><g id="c"><rect/></g><use href="#a b"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(true);
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(
+            false !== strpos($cleanData, 'id="a b"') && false !== strpos($cleanData, 'href="#a b"'),
+            'minifying must not create a reference the graph never measured'
+        );
+    }
+
+    /**
+     * Loop detection used to copy the current path at every step. Long chains of
+     * nested identified groups linked by `<use>` made that copying quadratic in
+     * memory: a 62 KB file needed well over 100 MB.
+     *
+     * @test
+     */
+    public function longNestedChainsDoNotExhaustMemory()
+    {
+        if (!function_exists('memory_reset_peak_usage')) {
+            self::markTestSkipped('Measuring the peak memory of one call needs PHP 8.2 or later.');
+        }
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($chain = 0; $chain < 14; $chain++) {
+            for ($i = 0; $i < 240; $i++) {
+                $svg .= '<g id="c' . $chain . '_' . $i . '">';
+            }
+            if ($chain < 13) {
+                $svg .= '<use href="#c' . ($chain + 1) . '_0"/>';
+            }
+            $svg .= str_repeat('</g>', 240);
+        }
+        $svg .= '</svg>';
+
+        memory_reset_peak_usage();
+        $before = memory_get_usage();
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+        $used = memory_get_peak_usage() - $before;
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue($used < 32 * 1024 * 1024, sprintf('used %d MB', $used >> 20));
+    }
+
+    /**
+     * Every graph edge used to read the target's `id` again, which walks the
+     * element's attributes. Many attributes before the `id`, times many
+     * references, was quadratic.
+     *
+     * @test
+     */
+    public function manyAttributesBeforeAReferencedIdAreHandledQuickly()
+    {
+        $attributes = '';
+        for ($i = 0; $i < 40000; $i++) {
+            $attributes .= ' data-a' . $i . '="x"';
+        }
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . ' id="t"/>'
+            . '<g id="h">' . str_repeat('<use href="#t"/>', 40000) . '</g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+    }
+
+    /**
+     * `srcset` holds a list of URLs, so checking it as one URL missed a remote
+     * candidate after a local one. Inlined in HTML, an `<image>` inside `<title>`
+     * or `<desc>` becomes an `<img>` that fetches it.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function remoteSrcsetDataProvider()
+    {
+        return [
+            'local candidate first' => ['/local.png 1x, https://evil.example/x.png 2x'],
+            'leading comma' => [', https://evil.example/x.png 2x'],
+            'invalid candidate first' => ['x y z, //evil.example/x.png'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteSrcsetDataProvider
+     */
+    public function removeRemoteReferencesRemovesRemoteSrcsetCandidates($srcset)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><title><image srcset="' . $srcset . '"/></title></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote srcset candidate should be removed');
+    }
+
+    /**
+     * An attribute spelled `xlink:href` but bound to another namespace is not
+     * XLink in XML, but an HTML parser maps it to XLink when the output is
+     * inlined. Kept next to a real XLink alias such as `data-x:href`, it let the
+     * graph measure one target while the page followed another.
+     *
+     * @test
+     */
+    public function xlinkHrefInTheWrongNamespaceIsRemoved()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="urn:wrong" xmlns:data-x="http://www.w3.org/1999/xlink">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" xlink:href="#a" data-x:href="#missing"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'xlink:href="#a"'), 'an xlink:href outside the XLink namespace should be removed');
+    }
+
+    /**
+     * Removing a remote reference from a `<style>` element must be reported, so
+     * callers and the CLI scanner can tell the input was changed.
+     *
+     * @test
+     */
+    public function removingRemoteCssFromAStyleElementIsReported()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(https://evil.example/x.css);</style><rect width="1" height="1"/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(count($sanitizer->getXmlIssues()) > 0, 'the removal should be reported');
+    }
+
+    /**
      * Encode an ASCII string as UTF-16.
      *
      * @param string $ascii

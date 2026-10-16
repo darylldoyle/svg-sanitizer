@@ -33,6 +33,11 @@ class Subject
     protected $useNestingLimit;
 
     /**
+     * @var string
+     */
+    protected $elementId;
+
+    /**
      * Number of subjects on the longest chain of uses starting here, once this
      * subject is known to lead to no loop. Null until then.
      *
@@ -66,6 +71,10 @@ class Subject
     {
         $this->element = $element;
         $this->useNestingLimit = $useNestingLimit;
+        // Read the id once. getAttribute() walks the element's attributes, and
+        // the graph asks for the id on every edge, so many attributes times many
+        // references was quadratic. Ids are final by the time the graph is built.
+        $this->elementId = $element->getAttribute('id');
     }
 
     /**
@@ -81,7 +90,7 @@ class Subject
      */
     public function getElementId()
     {
-        return $this->element->getAttribute('id');
+        return $this->elementId;
     }
 
     /**
@@ -92,11 +101,34 @@ class Subject
      */
     public function hasInfiniteLoop(array $subjects = [], $level = 1)
     {
+        $onPath = array();
+        foreach ($subjects as $subject) {
+            $onPath[spl_object_hash($subject)] = true;
+        }
+
+        return $this->findLoop($onPath, $level);
+    }
+
+    /**
+     * Walk the subjects this one renders, looking for one already on the path.
+     *
+     * The path is one shared set, added to on the way down and removed from on
+     * the way back. Copying a path array at every step instead was quadratic in
+     * memory on long chains of nested identified elements.
+     *
+     * @param array<string, bool> $onPath Subjects on the current path
+     * @param int $level The current level of nesting
+     * @return bool
+     * @throws \enshrined\svgSanitize\Exceptions\NestingException
+     */
+    protected function findLoop(array &$onPath, $level)
+    {
         if ($level > $this->useNestingLimit) {
             throw new \enshrined\svgSanitize\Exceptions\NestingException('Nesting level too high, aborting', 1570713498, null, $this->getElement());
         }
 
-        if (in_array($this, $subjects, true)) {
+        $key = spl_object_hash($this);
+        if (isset($onPath[$key])) {
             return true;
         }
 
@@ -107,26 +139,30 @@ class Subject
             return false;
         }
 
-        $subjects[] = $this;
-        $depth = 1;
-        foreach ($this->useCollection as $usage) {
-            $usedSubject = $usage->getSubject();
-            if ($usedSubject->hasInfiniteLoop($subjects, $level + 1)) {
-                return true;
+        $onPath[$key] = true;
+        try {
+            $depth = 1;
+            foreach ($this->useCollection as $usage) {
+                $usedSubject = $usage->getSubject();
+                if ($usedSubject->findLoop($onPath, $level + 1)) {
+                    return true;
+                }
+                $depth = max($depth, 1 + $usedSubject->loopFreeDepth);
             }
-            $depth = max($depth, 1 + $usedSubject->loopFreeDepth);
-        }
-        // A contained element is rendered as part of this one, not through a
-        // `<use>`, so it does not add a nesting level.
-        foreach ($this->containedSubjects as $containedSubject) {
-            if ($containedSubject->hasInfiniteLoop($subjects, $level)) {
-                return true;
+            // A contained element is rendered as part of this one, not through a
+            // `<use>`, so it does not add a nesting level.
+            foreach ($this->containedSubjects as $containedSubject) {
+                if ($containedSubject->findLoop($onPath, $level)) {
+                    return true;
+                }
+                $depth = max($depth, $containedSubject->loopFreeDepth);
             }
-            $depth = max($depth, $containedSubject->loopFreeDepth);
-        }
-        $this->loopFreeDepth = $depth;
+            $this->loopFreeDepth = $depth;
 
-        return false;
+            return false;
+        } finally {
+            unset($onPath[$key]);
+        }
     }
 
     /**

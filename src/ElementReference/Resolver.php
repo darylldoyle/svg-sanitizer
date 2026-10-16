@@ -221,7 +221,9 @@ class Resolver
             );
 
             try {
-                if ($useId === $subject->getElementId()) {
+                // Only a `<use>` follows its own href. An href on any other
+                // element, such as `<g id="a" href="#a">`, is inert.
+                if ($useId === $subject->getElementId() && strtolower($subject->getElement()->localName) === 'use') {
                     $this->markSubjectAsInvalid($subject);
                 } elseif ($subject->hasInfiniteLoop()) {
                     $this->markSubjectAsInvalid($subject);
@@ -249,9 +251,19 @@ class Resolver
      * @param Subject $subject
      */
     protected function markSubjectAsInvalid(Subject $subject) {
+        // Remove the `<use>` elements the subject renders, not only the targets of
+        // its direct uses. A subject whose loop runs through an element nested
+        // inside it has no direct uses, so clearing its edges alone would remove
+        // nothing and hide the loop from every later check.
+        $useElements = iterator_to_array(
+            $this->xPath->query('descendant-or-self::' . $this->xPath->createNodeName('use'), $subject->getElement()),
+            false
+        );
+
         $this->elementsToRemove = array_merge(
             $this->elementsToRemove,
-            $subject->clearInternalAndGetAffectedElements()
+            $subject->clearInternalAndGetAffectedElements(),
+            $useElements
         );
     }
 }
