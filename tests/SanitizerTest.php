@@ -2084,6 +2084,40 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * A `<use>` outside the SVG namespace is invisible to the reference graph, but
+     * an HTML parser puts it back in the SVG namespace when the output is inlined
+     * in a page.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function foreignNamespaceUseDataProvider()
+    {
+        return [
+            'empty namespace' => ['xmlns=""'],
+            'another namespace' => ['xmlns="http://example.com/other"'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider foreignNamespaceUseDataProvider
+     */
+    public function useElementsOutsideTheSvgNamespaceDoNotHideUseExpansion($namespace)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="L0"><rect width="1" height="1"/></g>';
+        for ($i = 1; $i <= 9; $i++) {
+            $svg .= '<g id="L' . $i . '">' . str_repeat('<use ' . $namespace . ' href="#L' . ($i - 1) . '"/>', 10) . '</g>';
+        }
+        $svg .= '<use ' . $namespace . ' href="#L9"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound once inlined');
+    }
+
+    /**
      * More ways a remote reference used to get past removeRemoteReferences(true).
      *
      * @return array<string, array{0: string}>

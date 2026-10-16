@@ -569,10 +569,14 @@ class Sanitizer
                     continue;
                 }
 
-                // `<USE>` means nothing in XML, but an HTML parser lower-cases it
-                // into a live `<use>` when the output is inlined in a page, where
-                // the `<use>` limits never measured it.
-                if (strtolower($currentElement->tagName) === 'use' && $currentElement->tagName !== 'use') {
+                // The `<use>` limits only measure `<use>` in the root's namespace.
+                // `<USE>`, or a `<use>` in another namespace (`xmlns=""`), means
+                // nothing in XML, but an HTML parser turns it into a live SVG
+                // `<use>` when the output is inlined in a page.
+                if (strtolower($currentElement->localName) === 'use'
+                    && ($currentElement->tagName !== 'use'
+                        || $currentElement->namespaceURI !== $this->xmlDocument->documentElement->namespaceURI)
+                ) {
                     $currentElement->parentNode->removeChild($currentElement);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
