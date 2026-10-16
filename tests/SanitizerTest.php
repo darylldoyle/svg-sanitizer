@@ -1777,8 +1777,9 @@ class SanitizerTest extends TestCase
         }
         $decoys .= '</defs></svg>';
 
-        // Later duplicates lose their id, so the decoys come back as plain groups.
-        $cleanDecoys = '<defs>' . str_repeat('<g/>', 10) . '</defs></svg>';
+        // Later duplicates of an id that a `<use>` references lose their id, so
+        // decoys a1 to a9 come back as plain groups. Nothing references a10.
+        $cleanDecoys = '<defs>' . str_repeat('<g/>', 9) . '<g id="a10"/></defs></svg>';
 
         $dataDirectory = __DIR__ . '/data';
         $initialData = str_replace('</svg>', $decoys, file_get_contents($dataDirectory . '/xlinkLaughsTest.svg'));
@@ -1974,6 +1975,42 @@ class SanitizerTest extends TestCase
     {
         $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g id="a"><use href="#a"/></g></svg>';
         $expected = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g><use href="#a"/></g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Only ids that a `<use>` references need a single target. A stylesheet's
+     * `#icon` rule styles every element with that id, so duplicates that no
+     * `<use>` references keep their id.
+     *
+     * @test
+     */
+    public function duplicateIdsThatNoUseReferencesKeepTheirStyling()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>#icon{fill:red}</style>'
+            . '<rect id="icon" width="1" height="1"/><rect id="icon" x="2" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(2, substr_count($cleanData, 'id="icon"'));
+    }
+
+    /**
+     * A duplicate id that a `<use>` references only through URL whitespace is
+     * still a referenced id, so its later duplicates lose it.
+     *
+     * @test
+     */
+    public function duplicateIdsReferencedThroughUrlWhitespaceAreStillRemoved()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g id="a"><use href="#a "/></g></svg>';
+        $expected = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g><use href="#a "/></g></svg>';
 
         $sanitizer = new Sanitizer();
         $cleanData = $sanitizer->sanitize($svg);

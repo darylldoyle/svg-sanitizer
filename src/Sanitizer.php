@@ -643,20 +643,33 @@ class Sanitizer
     }
 
     /**
-     * Remove the `id` from every element after the first one with that id.
+     * Remove the `id` from every element after the first one with an id that a
+     * `<use>` references.
      *
-     * Browsers resolve `#id` to the first element with that id, so later
-     * duplicates can never be referenced. Removing their ids leaves exactly one
-     * possible target per id, so the `<use>` graph cannot be shown a different
-     * element from the one that renders.
+     * Browsers resolve `#id` to the first element with that id. Removing the id
+     * from later duplicates leaves exactly one possible target for every `<use>`,
+     * so the `<use>` graph cannot be shown a different element from the one that
+     * renders. Ids that no `<use>` references are left alone, because a CSS
+     * `#id` rule styles every element that carries them.
      *
      * @param XPath $xPath
      */
     protected function removeDuplicateIds(XPath $xPath)
     {
+        $referencedIds = array();
+        foreach ($xPath->query("//*[name()='use']") as $useElement) {
+            $useId = Helper::extractIdReferenceFromHref(Helper::getElementHref($useElement));
+            if ($useId !== null) {
+                $referencedIds[$useId] = true;
+            }
+        }
+
         $seen = array();
         foreach ($xPath->query('//*[@id]') as $element) {
             $id = $element->getAttribute('id');
+            if (!isset($referencedIds[$id])) {
+                continue;
+            }
             if (!isset($seen[$id])) {
                 $seen[$id] = true;
                 continue;
