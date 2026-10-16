@@ -523,7 +523,7 @@ class Sanitizer
              * we should check what the element is before removing it. For now we'll only
              * remove <use> elements.
              */
-            if (in_array($currentElement, $elementsToRemove) && 'use' === $currentElement->nodeName) {
+            if ('use' === $currentElement->nodeName && in_array($currentElement, $elementsToRemove)) {
                 $currentElement->parentNode->removeChild($currentElement);
                 $this->xmlIssues[] = array(
                     'message' => 'Invalid \'' . $currentElement->tagName . '\'',
@@ -1248,16 +1248,9 @@ class Sanitizer
             return;
         }
 
-        if ($currentElement->hasChildNodes()) {
-            // Same as in startClean(): work on a static snapshot, stepping
-            // backwards through a live \DOMNodeList via item($j) is O(n²).
-            $childNodes = iterator_to_array($currentElement->childNodes, false);
-            for ($j = count($childNodes) - 1; $j >= 0; $j--) {
-                /** @var \DOMElement $childElement */
-                $childElement = $childNodes[$j];
-                $this->cleanUnsafeNodes($childElement);
-            }
-        }
+        // No need to recurse: startClean() calls this for every node it walks.
+        // Recursing here as well re-walked each subtree once per ancestor, which
+        // multiplied the work by the nesting depth.
     }
 
     /**

@@ -1659,6 +1659,136 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * Looking up the element a `<use>` points at used to scan every element with
+     * an id, once per `<use>`, so many ids plus many uses was quadratic.
+     *
+     * @test
+     */
+    public function manyIdsAndManyUsesAreSanitizedQuickly()
+    {
+        $count = 8000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($i = 0; $i < $count; $i++) {
+            $svg .= '<g id="i' . $i . '"/>';
+        }
+        $svg .= str_repeat('<use href="#missing"/>', $count) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame($count, substr_count($cleanData, '<use'), 'uses of a missing id expand to nothing and stay');
+    }
+
+    /**
+     * Every identified ancestor of a `<use>` must account for it, but listing all
+     * nested `<use>` elements once per ancestor was depth x uses.
+     *
+     * @test
+     */
+    public function deeplyNestedIdsWithManyUsesAreSanitizedQuickly()
+    {
+        $depth = 250;
+        $count = 30000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($i = 0; $i < $depth; $i++) {
+            $svg .= '<g id="g' . $i . '">';
+        }
+        $svg .= str_repeat('<use href="#leaf"/>', $count) . str_repeat('</g>', $depth)
+            . '<rect id="leaf" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame($count, substr_count($cleanData, '<use'), 'uses of a plain rect stay');
+    }
+
+    /**
+     * Each node used to be checked against the whole list of elements marked for
+     * removal, even text nodes that can never be on it.
+     *
+     * @test
+     */
+    public function manySelfReferencesAmongManyNodesAreSanitizedQuickly()
+    {
+        $count = 20000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($i = 0; $i < $count; $i++) {
+            $svg .= '<g id="a' . $i . '"><use href="#a' . $i . '"/></g>';
+        }
+        $svg .= str_repeat('<text>x</text>', $count) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(0, substr_count($cleanData, '<use'), 'every self reference is removed');
+        self::assertSame($count, substr_count($cleanData, '<text'), 'text survives');
+    }
+
+    /**
+     * Each element used to have its whole subtree re-walked for unsafe nodes,
+     * on top of the main walk, so deep nesting multiplied the work by the depth.
+     *
+     * @test
+     */
+    public function deeplyNestedDocumentIsSanitizedQuickly()
+    {
+        $depth = 250;
+        $count = 80000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<g>', $depth)
+            . str_repeat('<rect width="1" height="1"/><!-- c -->', $count)
+            . str_repeat('</g>', $depth) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame($count, substr_count($cleanData, '<rect'), 'rects survive');
+        self::assertSame(0, substr_count($cleanData, '<!--'), 'comments are removed');
+    }
+
+    /**
+     * Browsers resolve `#id` to the first element with that id. The reference
+     * graph used to keep the last one, so empty decoys with the same ids, placed
+     * after the real groups, hid the whole billion-laughs chain from the
+     * expansion threshold.
+     *
+     * @test
+     */
+    public function duplicateIdDecoysDoNotHideUseExpansion()
+    {
+        $decoys = '<defs>';
+        for ($i = 1; $i <= 10; $i++) {
+            $decoys .= '<g id="a' . $i . '"/>';
+        }
+        $decoys .= '</defs></svg>';
+
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = str_replace('</svg>', $decoys, file_get_contents($dataDirectory . '/xlinkLaughsTest.svg'));
+        $expected = str_replace('</svg>', $decoys, file_get_contents($dataDirectory . '/xlinkLaughsClean.svg'));
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
      * Encode an ASCII string as UTF-16.
      *
      * @param string $ascii

@@ -70,12 +70,13 @@ class Resolver
      */
     public function findByElementId($elementId)
     {
-        return array_filter(
-            $this->subjects,
-            function (Subject $subject) use ($elementId) {
-                return $elementId === $subject->getElementId();
-            }
-        );
+        // Subjects are keyed by id, so look it up directly. Filtering every
+        // subject here made each `<use>` check cost as much as the whole graph.
+        if (!isset($this->subjects[$elementId])) {
+            return [];
+        }
+
+        return [$elementId => $this->subjects[$elementId]];
     }
 
     /**
@@ -86,7 +87,13 @@ class Resolver
         /** @var \DOMNodeList|\DOMElement[] $elements */
         $elements = $this->xPath->query('//*[@id]');
         foreach ($elements as $element) {
-            $this->subjects[$element->getAttribute('id')] = new Subject($element, $this->useNestingLimit);
+            $id = $element->getAttribute('id');
+            // Browsers resolve `#id` to the first element with that id. Keeping a
+            // later duplicate instead would let an empty decoy stand in for the
+            // element that is actually rendered.
+            if (!isset($this->subjects[$id])) {
+                $this->subjects[$id] = new Subject($element, $this->useNestingLimit);
+            }
         }
     }
 
@@ -102,36 +109,95 @@ class Resolver
         // `Sanitizer::cleanHrefAttributes()` normalizes back to `href`/`xlink:href`
         // afterwards, which would hand back a live reference the graph never saw.
         //
-        // Every `<use>` inside the element counts, however deeply it is nested:
-        // rendering the element renders all of them, so wrapping them in a plain
-        // `<g>` must not hide them from the graph.
-        $useNodeName = $this->xPath->createNodeName('use');
-        foreach ($this->subjects as $subject) {
-            $useElements = $this->xPath->query(
-                './/' . $useNodeName,
-                $subject->getElement()
-            );
+        // Every `<use>` inside an identified element counts, however deeply it is
+        // nested: rendering the element renders all of them, so wrapping them in
+        // a plain `<g>` must not hide them from the graph. To keep this linear,
+        // each `<use>` is attached to its nearest identified ancestor only, and
+        // each identified element records the identified elements nested
+        // directly inside it (see Subject::addContained()).
+        $useElements = new \SplObjectStorage();
+        foreach ($this->xPath->query('//' . $this->xPath->createNodeName('use')) as $useElement) {
+            $useElements->attach($useElement);
+        }
 
-            /** @var \DOMElement $useElement */
-            foreach ($useElements as $useElement) {
-                $useId = Helper::extractIdReferenceFromHref(
-                    Helper::getElementHref($useElement)
-                );
-                if ($useId === null || !isset($this->subjects[$useId])) {
-                    continue;
+        $documentElement = $this->xPath->document->documentElement;
+        if ($documentElement !== null) {
+            $ancestorIds = [];
+            $this->walkReferences($documentElement, null, $ancestorIds, $useElements);
+        }
+    }
+
+    /**
+     * Walk the tree once, recording each `<use>` reference on its nearest
+     * identified ancestor and each identified element on the one around it.
+     *
+     * @param \DOMElement $element
+     * @param Subject|null $nearest Nearest identified ancestor
+     * @param array<string, bool> $ancestorIds Ids of all ancestors
+     * @param \SplObjectStorage $useElements
+     */
+    protected function walkReferences(\DOMElement $element, $nearest, array &$ancestorIds, \SplObjectStorage $useElements)
+    {
+        if ($useElements->contains($element)) {
+            $this->addReference($element, $nearest, $ancestorIds);
+        }
+
+        $id = null;
+        if ($element->hasAttribute('id')) {
+            $id = $element->getAttribute('id');
+            if (isset($this->subjects[$id]) && $this->subjects[$id]->getElement() === $element) {
+                if ($nearest !== null) {
+                    $nearest->addContained($this->subjects[$id]);
                 }
-                $referenced = $this->subjects[$useId];
-                // A `<use>` inside the element it references would render itself
-                // forever. That is attacker input, not a programming error, so
-                // remove the `<use>` instead of adding a self edge.
-                if ($referenced === $subject) {
-                    $this->elementsToRemove[] = $useElement;
-                    continue;
-                }
-                $subject->addUse($referenced);
-                $referenced->addUsedIn($subject);
+                $nearest = $this->subjects[$id];
+            }
+            if (isset($ancestorIds[$id])) {
+                $id = null;
+            } else {
+                $ancestorIds[$id] = true;
             }
         }
+
+        foreach ($element->childNodes as $child) {
+            if ($child instanceof \DOMElement) {
+                $this->walkReferences($child, $nearest, $ancestorIds, $useElements);
+            }
+        }
+
+        if ($id !== null) {
+            unset($ancestorIds[$id]);
+        }
+    }
+
+    /**
+     * @param \DOMElement $useElement
+     * @param Subject|null $nearest
+     * @param array<string, bool> $ancestorIds
+     */
+    protected function addReference(\DOMElement $useElement, $nearest, array $ancestorIds)
+    {
+        $useId = Helper::extractIdReferenceFromHref(
+            Helper::getElementHref($useElement)
+        );
+        if ($useId === null || !isset($this->subjects[$useId])) {
+            return;
+        }
+
+        // A `<use>` inside the element it references would render itself
+        // forever. That is attacker input, not a programming error, so remove
+        // the `<use>` instead of adding a self edge.
+        if (isset($ancestorIds[$useId])) {
+            $this->elementsToRemove[] = $useElement;
+            return;
+        }
+
+        if ($nearest === null) {
+            return;
+        }
+
+        $referenced = $this->subjects[$useId];
+        $nearest->addUse($referenced);
+        $referenced->addUsedIn($nearest);
     }
 
     /**

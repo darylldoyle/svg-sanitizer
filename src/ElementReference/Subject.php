@@ -19,6 +19,15 @@ class Subject
     protected $usedInCollection = [];
 
     /**
+     * Identified elements nested inside this one with no identified element
+     * between. Rendering this element renders them, and every `<use>` inside
+     * them, so they count towards this element's uses.
+     *
+     * @var Subject[]
+     */
+    protected $containedSubjects = [];
+
+    /**
      * @var int
      */
     protected $useNestingLimit;
@@ -107,6 +116,14 @@ class Subject
             }
             $depth = max($depth, 1 + $usedSubject->loopFreeDepth);
         }
+        // A contained element is rendered as part of this one, not through a
+        // `<use>`, so it does not add a nesting level.
+        foreach ($this->containedSubjects as $containedSubject) {
+            if ($containedSubject->hasInfiniteLoop($subjects, $level)) {
+                return true;
+            }
+            $depth = max($depth, $containedSubject->loopFreeDepth);
+        }
         $this->loopFreeDepth = $depth;
 
         return false;
@@ -127,6 +144,20 @@ class Subject
             return;
         }
         $this->useCollection[$identifier] = new Usage($subject);
+    }
+
+    /**
+     * Record an identified element nested inside this one.
+     *
+     * @param Subject $subject
+     */
+    public function addContained(Subject $subject)
+    {
+        if ($subject === $this) {
+            throw new \LogicException('Cannot contain self', 1570713418);
+        }
+        $this->forgetComputedValues();
+        $this->containedSubjects[] = $subject;
     }
 
     /**
@@ -174,6 +205,16 @@ class Subject
                 break;
             }
         }
+        // Uses inside contained elements are rendered as part of this one.
+        foreach ($this->containedSubjects as $containedSubject) {
+            if ($count === PHP_INT_MAX) {
+                break;
+            }
+            $count += $containedSubject->countUse($accumulated);
+            if (!is_int($count)) {
+                $count = PHP_INT_MAX;
+            }
+        }
         $this->countingUse = false;
 
         return $this->useCounts[$key] = $count;
@@ -205,6 +246,7 @@ class Subject
 
         $this->usedInCollection = [];
         $this->useCollection = [];
+        $this->containedSubjects = [];
         $this->forgetComputedValues();
 
         return $elements;
