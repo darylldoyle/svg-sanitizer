@@ -88,6 +88,17 @@ class Sanitizer
     protected $allowHugeFiles = false;
 
     /**
+     * Regex fragment matching the start of a URL that leaves the document: a
+     * special scheme, or a protocol-relative `//`.
+     *
+     * A special scheme is remote whatever follows the colon, because the URL
+     * parser does not need the slashes (`https:host` and `https:/host` both
+     * reach `https://host`). Browsers also read a backslash as a slash in these
+     * URLs, so `/\host` and `\\host` are protocol-relative too.
+     */
+    const REMOTE_URL_START = '(?:(?:https?|ftp|file):|[/\\\\]{2})';
+
+    /**
      *
      */
     function __construct()
@@ -239,28 +250,33 @@ class Sanitizer
             return false;
         }
 
+        // Stripping can leave nothing behind (input that was only PHP tags or a
+        // DOCTYPE). That is not a document, and loadXML('') would throw.
+        if (trim($dirty) === '') {
+            $this->xmlIssues = array(array(
+                'message' => 'Document is empty',
+                'line' => 0,
+            ));
+            return false;
+        }
+
         $this->resetInternal();
         $this->setUpBefore();
 
-        // Input we cannot process safely (a failed regex, or a document the
-        // reference graph rejects) fails closed instead of throwing.
+        // Input we cannot process safely (a failed regex, a document the
+        // reference graph rejects, or anything unexpected) fails closed with
+        // false instead of throwing out of sanitize().
         try {
             $clean = $this->sanitizeDocument($dirty);
-        } catch (RegexException $e) {
+        } catch (\Throwable $e) {
             $this->xmlIssues[] = array(
                 'message' => $e->getMessage(),
                 'line' => 0,
             );
             $clean = false;
-        } catch (\LogicException $e) {
-            $this->xmlIssues[] = array(
-                'message' => $e->getMessage(),
-                'line' => 0,
-            );
-            $clean = false;
+        } finally {
+            $this->resetAfter();
         }
-
-        $this->resetAfter();
 
         return $clean;
     }
@@ -299,14 +315,21 @@ class Sanitizer
             return false;
         }
 
-        // Pre-process all identified elements
+        // Fails early (with a LogicException) unless the root is a single <svg>.
         $xPath = new XPath($this->xmlDocument);
+
+        // Clean tags and attributes first. The `<use>` limits must be measured on
+        // the document a browser will render: before cleaning, a decoy the
+        // cleaner removes, an unsafe href hiding a safe one, or an attribute the
+        // cleaner renames would show the graph a different reference.
+        $this->elementReferenceResolver = null;
+        $this->startClean($this->xmlDocument->childNodes, array());
+        $this->removeDuplicateIds($xPath);
+
+        // Then measure the `<use>` references and remove any that break the limits.
         $this->elementReferenceResolver = new Resolver($xPath, $this->useNestingLimit);
         $this->elementReferenceResolver->collect();
-        $elementsToRemove = $this->elementReferenceResolver->getElementsToRemove();
-
-        // Start the cleaning process
-        $this->startClean($this->xmlDocument->childNodes, $elementsToRemove);
+        $this->removeUnsafeUseElements($this->elementReferenceResolver->getElementsToRemove());
 
         // Save cleaned XML to a variable
         if ($this->removeXMLTag) {
@@ -400,7 +423,10 @@ class Sanitizer
      */
     protected function removeDoctype($dirty)
     {
-        if (stripos($dirty, '<!DOCTYPE') === false) {
+        // Lower-case once and search with strpos(). stripos() lower-cases its
+        // whole haystack on every call, which is quadratic over many matches.
+        $lowerDirty = strtolower($dirty);
+        if (strpos($lowerDirty, '<!doctype') === false) {
             return $dirty;
         }
 
@@ -408,7 +434,7 @@ class Sanitizer
         $offset = 0;
         $length = strlen($dirty);
 
-        while (($start = stripos($dirty, '<!DOCTYPE', $offset)) !== false) {
+        while (($start = strpos($lowerDirty, '<!doctype', $offset)) !== false) {
             $output .= substr($dirty, $offset, $start - $offset);
             $i = $start + strlen('<!DOCTYPE');
             $depth = 0;
@@ -543,6 +569,18 @@ class Sanitizer
                     continue;
                 }
 
+                // `<USE>` means nothing in XML, but an HTML parser lower-cases it
+                // into a live `<use>` when the output is inlined in a page, where
+                // the `<use>` limits never measured it.
+                if (strtolower($currentElement->tagName) === 'use' && $currentElement->tagName !== 'use') {
+                    $currentElement->parentNode->removeChild($currentElement);
+                    $this->xmlIssues[] = array(
+                        'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
+                        'line' => $currentElement->getLineNo(),
+                    );
+                    continue;
+                }
+
                 // Strip remote @import / url() references from inline <style> text.
                 // The text content of <style> is never otherwise inspected, so remote
                 // CSS references would pass straight through.
@@ -556,9 +594,11 @@ class Sanitizer
 
                 $this->cleanAttributesOnWhitelist($currentElement);
 
+                // The reference limits are checked after cleaning, in
+                // removeUnsafeUseElements(), once the graph has been built.
                 if (strtolower($currentElement->tagName) === 'use') {
                     if ($this->isUseTagDirty($currentElement)
-                        || $this->isUseTagExceedingThreshold($currentElement)
+                        || ($this->elementReferenceResolver !== null && $this->isUseTagExceedingThreshold($currentElement))
                     ) {
                         $currentElement->parentNode->removeChild($currentElement);
                         $this->xmlIssues[] = array(
@@ -599,32 +639,120 @@ class Sanitizer
     }
 
     /**
+     * Remove the `id` from every element after the first one with that id.
+     *
+     * Browsers resolve `#id` to the first element with that id, so later
+     * duplicates can never be referenced. Removing their ids leaves exactly one
+     * possible target per id, so the `<use>` graph cannot be shown a different
+     * element from the one that renders.
+     *
+     * @param XPath $xPath
+     */
+    protected function removeDuplicateIds(XPath $xPath)
+    {
+        $seen = array();
+        foreach ($xPath->query('//*[@id]') as $element) {
+            $id = $element->getAttribute('id');
+            if (!isset($seen[$id])) {
+                $seen[$id] = true;
+                continue;
+            }
+            $element->removeAttribute('id');
+            $this->xmlIssues[] = array(
+                'message' => 'Duplicate id \'' . $id . '\'',
+                'line' => $element->getLineNo(),
+            );
+        }
+    }
+
+    /**
+     * Remove `<use>` elements that are part of a reference loop, nest too deeply
+     * or expand past the threshold. Runs after cleaning, on the reference graph
+     * of the cleaned document.
+     *
+     * @param array $elementsToRemove Elements the reference graph flagged
+     */
+    protected function removeUnsafeUseElements(array $elementsToRemove)
+    {
+        // An XPath result is a fixed list. Before PHP 8.3, walking the live list
+        // from getElementsByTagName() searched the document again for every
+        // element, which made this loop quadratic.
+        $xPath = new \DOMXPath($this->xmlDocument);
+        $useElements = iterator_to_array($xPath->query("//*[name()='use']"), false);
+
+        foreach ($useElements as $useElement) {
+            // Already gone along with an ancestor.
+            if ($useElement->parentNode === null) {
+                continue;
+            }
+
+            /**
+             * If the element has exceeded the nesting limit, we should remove it.
+             *
+             * As it's only <use> elements that cause us issues with nesting DOS attacks
+             * we should check what the element is before removing it. For now we'll only
+             * remove <use> elements.
+             */
+            if (in_array($useElement, $elementsToRemove)) {
+                $useElement->parentNode->removeChild($useElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Invalid \'' . $useElement->tagName . '\'',
+                    'line'    => $useElement->getLineNo(),
+                );
+                continue;
+            }
+
+            if ($this->isUseTagExceedingThreshold($useElement)) {
+                $useElement->parentNode->removeChild($useElement);
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious \'' . $useElement->tagName . '\'',
+                    'line' => $useElement->getLineNo(),
+                );
+            }
+        }
+    }
+
+    /**
      * Only allow attributes that are on the whitelist
      *
      * @param \DOMElement $element
      */
     protected function cleanAttributesOnWhitelist(\DOMElement $element)
     {
-        // Work on a static snapshot: stepping backwards through the live
-        // \DOMNamedNodeMap via item($x) is O(n²) in the number of attributes.
+        // Work on a static snapshot, and read and remove each attribute through
+        // its own node. Going through the element by index (item($x)) or by name
+        // (getAttribute()/removeAttribute()) walks its attribute list from the
+        // start each time, which is O(n²) in the number of attributes.
         $attributes = iterator_to_array($element->attributes, false);
 
         for ($x = count($attributes) - 1; $x >= 0; $x--) {
+            $attribute = $attributes[$x];
             // get attribute name
-            $attrName = $attributes[$x]->nodeName;
+            $attrName = $attribute->nodeName;
 
             // Remove attribute if not in whitelist
             if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
 
-                $element->removeAttribute($attrName);
+                $element->removeAttributeNode($attribute);
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious attribute \'' . $attrName . '\'',
                     'line' => $element->getLineNo(),
                 );
 
                 // Once removed, skip the remaining checks for this attribute so the
-                // same name can never be passed to removeAttribute() twice in one
-                // iteration (a DTD-defaulted attribute could otherwise re-materialise).
+                // same node is never removed twice.
+                continue;
+            }
+
+            // `ID` means nothing in XML, but an HTML parser lower-cases it into a
+            // live `id` when the output is inlined in a page, where the `<use>`
+            // limits never measured it.
+            if (strtolower($attrName) === 'id' && $attrName !== 'id') {
+                $element->removeAttributeNode($attribute);
+                $this->xmlIssues[] = array(
+                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
+                    'line' => $element->getLineNo(),
+                );
                 continue;
             }
 
@@ -640,9 +768,9 @@ class Sanitizer
              * padded values are all covered.
              */
             if ('attributename' === strtolower($attrName)
-                && false !== stripos($element->getAttribute($attrName), 'href')
+                && false !== stripos($attribute->value, 'href')
             ) {
-                $element->removeAttribute($attrName);
+                $element->removeAttributeNode($attribute);
                 $this->xmlIssues[] = array(
                     'message' => 'Suspicious attribute \'' . $attrName . '\'',
                     'line'    => $element->getLineNo(),
@@ -657,9 +785,9 @@ class Sanitizer
              * We have to do this as the link is still ran in this case.
              */
             if (false !== stripos($attrName, 'href')) {
-                $href = $element->getAttribute($attrName);
+                $href = $attribute->value;
                 if (false === $this->isHrefSafeValue($href)) {
-                    $element->removeAttribute($attrName);
+                    $element->removeAttributeNode($attribute);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'href\'',
                         'line'    => $element->getLineNo(),
@@ -670,16 +798,16 @@ class Sanitizer
 
             // Do we want to strip remote references?
             if($this->removeRemoteReferences) {
-                $attr = $element->attributes->item($x);
-                $value = ($attr !== null && isset($attr->value)) ? $attr->value : '';
+                $value = $attribute->value;
 
                 // A remote url()/@import reference, or a value that is itself a remote
                 // URL (e.g. a bare href/src). Presentation attributes such as `fill`
-                // are parsed as CSS, so check them with CSS escapes resolved too
-                // (`url(\2f\2f host)` is `url(//host)`).
+                // or `mask` are parsed as CSS, so check them with CSS escapes
+                // resolved too (`url(\2f\2f host)` is `url(//host)`), including
+                // escapes that only look like comments.
                 $isRemote = $this->hasRemoteReference($value)
                     || $this->isRemoteUrl($value)
-                    || $this->hasRemoteReference($this->normalizeCss($value));
+                    || $this->hasRemoteCssReference($value);
 
                 // The style attribute is CSS, so resolve escapes/comments and reuse the
                 // same remote-token detection used for <style> elements (this also
@@ -691,7 +819,7 @@ class Sanitizer
 
                 // Remove attribute if it has a remote reference
                 if ($isRemote) {
-                    $element->removeAttribute($attrName);
+                    $element->removeAttributeNode($attribute);
                     $this->xmlIssues[] = array(
                         'message' => 'Suspicious attribute \'' . $attrName . '\'',
                         'line' => $element->getLineNo(),
@@ -708,10 +836,12 @@ class Sanitizer
      */
     protected function cleanXlinkHrefs(\DOMElement $element)
     {
-        foreach ($element->attributes as $attribute) {
+        // Iterate a snapshot: removing from the live attribute map while walking
+        // it skips the attribute after each removal.
+        foreach (iterator_to_array($element->attributes, false) as $attribute) {
             // remove attributes with unexpected namespace prefix, e.g. `XLinK:href` (instead of `xlink:href`)
             if ($attribute->prefix === '' && strtolower($attribute->nodeName) === 'xlink:href') {
-                $element->removeAttribute($attribute->nodeName);
+                $element->removeAttributeNode($attribute);
                 $this->xmlIssues[] = array(
                     'message' => sprintf('Unexpected attribute \'%s\'', $attribute->nodeName),
                     'line' => $element->getLineNo(),
@@ -741,7 +871,7 @@ class Sanitizer
         );
         foreach ($relevantAttributes as $attribute) {
             if (!$this->isHrefSafeValue($attribute->value)) {
-                $element->removeAttribute($attribute->nodeName);
+                $element->removeAttributeNode($attribute);
                 $this->xmlIssues[] = array(
                     'message' => sprintf('Suspicious attribute \'%s\'', $attribute->nodeName),
                     'line' => $element->getLineNo(),
@@ -749,11 +879,16 @@ class Sanitizer
                 continue;
             }
             // in case the attribute name is `HrEf`/`xlink:HrEf`, adjust it to `href`/`xlink:href`
+            $canonicalName = strtolower($attribute->nodeName);
             if (!in_array($attribute->nodeName, $this->allowedAttrs, true)
-                && in_array(strtolower($attribute->nodeName), $this->allowedAttrs, true)
+                && in_array($canonicalName, $this->allowedAttrs, true)
             ) {
-                $element->removeAttribute($attribute->nodeName);
-                $element->setAttribute(strtolower($attribute->nodeName), $attribute->value);
+                $element->removeAttributeNode($attribute);
+                // Never overwrite a correctly spelled attribute: that is the one
+                // the element already follows.
+                if (!$element->hasAttribute($canonicalName)) {
+                    $element->setAttribute($canonicalName, $attribute->value);
+                }
             }
         }
     }
@@ -845,11 +980,11 @@ class Sanitizer
     {
         $value = $this->removeNonPrintableCharacters($value);
 
-        if ($this->pregMatch('~url\(\s*[\'"]?\s*((?:https?|ftp|file):)?[/\\\\]{2}~xi', $value)) {
+        if ($this->pregMatch('~url\(\s*+[\'"]?\s*+' . self::REMOTE_URL_START . '~i', $value)) {
             return true;
         }
 
-        if ($this->pregMatch('~@import\s+(?:url\(\s*)?[\'"]?\s*((?:https?|ftp|file):)?[/\\\\]{2}~xi', $value)) {
+        if ($this->pregMatch('~@import\s++(?:url\(\s*+)?[\'"]?\s*+' . self::REMOTE_URL_START . '~i', $value)) {
             return true;
         }
 
@@ -860,9 +995,8 @@ class Sanitizer
      * Is the value itself a remote URL (a bare href/src rather than a url() wrapper)?
      *
      * Flags absolute (`http(s)`/`ftp`/`file`) and protocol-relative (`//`) URLs while
-     * leaving local (`/x`) and fragment (`#x`) references untouched. Browsers read
-     * a backslash as a slash in these URLs, so `/\host` and `\\host` count as
-     * protocol-relative too.
+     * leaving local (`/x`) and fragment (`#x`) references untouched. See
+     * REMOTE_URL_START for the forms that count.
      *
      * @param $value
      * @return bool
@@ -871,7 +1005,7 @@ class Sanitizer
     {
         $value = $this->removeNonPrintableCharacters($value);
 
-        return $this->pregMatch('~^\s*(?:(?:https?|ftp|file):)?[/\\\\]{2}~i', $value);
+        return $this->pregMatch('~^\s*+' . self::REMOTE_URL_START . '~i', $value);
     }
 
     /**
@@ -900,10 +1034,38 @@ class Sanitizer
         // hides, keep the normalized (and stripped) result. Otherwise strip the
         // original in place, leaving legitimate escaped CSS untouched.
         if ($strippedNormalized !== $normalized && $normalized !== $css) {
-            return $strippedNormalized;
+            $result = $strippedNormalized;
+        } else {
+            $result = $this->stripRemoteCssTokens($css);
         }
 
-        return $this->stripRemoteCssTokens($css);
+        // Check the result once more, the way a browser reads it. Stripping can
+        // join the text around a removed token into a new one, an escaped `/*`
+        // can pass for a comment in the normalized copy only, and control
+        // characters inside a URL are dropped by the browser. Rather than strip
+        // again, drop CSS that still holds a remote reference.
+        if ($this->hasRemoteCssReference($result)) {
+            return '';
+        }
+
+        return $result;
+    }
+
+    /**
+     * Does this CSS still reference a remote URL when a browser reads it?
+     *
+     * Resolves escapes and drops control characters, as browsers do inside a URL,
+     * but keeps comments: an escaped `/*` or a `/*` inside a string is not a
+     * comment, and a real one inside `url()` is part of the URL.
+     *
+     * @param string $css
+     * @return bool
+     */
+    protected function hasRemoteCssReference($css)
+    {
+        $decoded = $this->pregReplace('/[\x00-\x1F\x7F]/', '', $this->decodeCssEscapes($css));
+
+        return $this->stripRemoteCssTokens($decoded) !== $decoded;
     }
 
     /**
@@ -918,7 +1080,10 @@ class Sanitizer
         // or end of input otherwise. A CSS tokenizer closes an unclosed url()/
         // function token implicitly and still fetches, so requiring a closing paren
         // would let a value that omits it slip past.
-        $css = $this->pregReplace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?[/\\\\]{2}[^)}\r\n]*\)?~i', '', $css);
+        // Removing a construct can join the text on either side into a new one
+        // (`uurl(//a)rl(//b)` becomes `url(//b)`). stripRemoteCssReferences()
+        // checks its result again and drops CSS where that happened.
+        $css = $this->pregReplace('~url\(\s*+[\'"]?\s*+' . self::REMOTE_URL_START . '[^)}\r\n]*\)?~i', '', $css);
         $css = $this->pregReplace('~@import\b[^;]*;?~i', '', $css);
         // image-set() accepts a bare remote string with no url() token of its own.
         $css = $this->stripRemoteImageSets($css);
@@ -928,8 +1093,9 @@ class Sanitizer
 
     /**
      * Remove every `image-set(...)` / `-webkit-image-set(...)` whose arguments hold
-     * a quoted remote URL. Like url(), the arguments run to the first `)`, `}` or
-     * line break, so an unclosed one is still caught.
+     * a quoted remote URL. The arguments run to the matching `)`, skipping nested
+     * functions and quoted strings, or to the end of the block (`}`) or of the
+     * input, so an unclosed one is still caught.
      *
      * This is a linear scan. A regex here rescanned the rest of the stylesheet
      * from every `image-set(`, which was quadratic on many unclosed tokens.
@@ -942,8 +1108,11 @@ class Sanitizer
         $output = '';
         $offset = 0;
         $length = strlen($css);
+        // Lower-case once and search with strpos(). stripos() lower-cases its
+        // whole haystack on every call, which is quadratic over many matches.
+        $lowerCss = strtolower($css);
 
-        while (($start = stripos($css, 'image-set', $offset)) !== false) {
+        while (($start = strpos($lowerCss, 'image-set', $offset)) !== false) {
             $cursor = $start + strlen('image-set');
             $cursor += strspn($css, " \t\n\r\f\v", $cursor);
 
@@ -954,18 +1123,18 @@ class Sanitizer
             }
 
             $argumentsStart = $cursor + 1;
-            $argumentsEnd = $argumentsStart + strcspn($css, ")}\r\n", $argumentsStart);
+            $argumentsEnd = $this->findCssFunctionEnd($css, $argumentsStart);
 
             if (!$this->hasQuotedRemoteUrl($css, $argumentsStart, $argumentsEnd)) {
-                // Any later image-set( before $argumentsEnd shares this same
-                // argument tail, so it cannot hold a remote string either.
+                // Any later image-set( before $argumentsEnd sits inside these
+                // arguments, which were all checked.
                 $output .= substr($css, $offset, $argumentsEnd - $offset);
                 $offset = $argumentsEnd;
                 continue;
             }
 
             $removeFrom = $start;
-            if ($start - 8 >= $offset && strtolower(substr($css, $start - 8, 8)) === '-webkit-') {
+            if ($start - 8 >= $offset && substr($lowerCss, $start - 8, 8) === '-webkit-') {
                 $removeFrom = $start - 8;
             }
 
@@ -974,6 +1143,55 @@ class Sanitizer
         }
 
         return $output . substr($css, $offset);
+    }
+
+    /**
+     * Find where a CSS function's arguments end: the offset of the `)` that
+     * closes it, or of a `}` that ends the block first, or the end of the input.
+     * Nested functions, quoted strings and escapes are skipped, so a `)` inside
+     * them does not end the function.
+     *
+     * @param string $css
+     * @param int $from Offset just after the opening `(`
+     * @return int
+     */
+    protected function findCssFunctionEnd($css, $from)
+    {
+        $length = strlen($css);
+        $depth = 1;
+
+        for ($i = $from; $i < $length; $i++) {
+            $i += strcspn($css, "()'\"}\\", $i);
+            if ($i >= $length) {
+                break;
+            }
+
+            $char = $css[$i];
+            if ($char === '\\') {
+                // Skip the escaped character.
+                $i++;
+            } elseif ($char === '"' || $char === "'") {
+                // Skip to the closing quote. A string also ends at a line break.
+                for ($i++; $i < $length; $i++) {
+                    $i += strcspn($css, $char . "\\\n", $i);
+                    if ($i >= $length || $css[$i] !== '\\') {
+                        break;
+                    }
+                    $i++;
+                }
+            } elseif ($char === '(') {
+                $depth++;
+            } elseif ($char === ')') {
+                if (--$depth === 0) {
+                    return $i;
+                }
+            } else {
+                // `}` ends the block, and the function with it.
+                return $i;
+            }
+        }
+
+        return $length;
     }
 
     /**
@@ -991,7 +1209,7 @@ class Sanitizer
             if ($quote >= $to) {
                 break;
             }
-            if ($this->pregMatch('~\G\s*(?:(?:https?|ftp|file):)?[/\\\\]{2}~i', $css, $quote + 1)) {
+            if ($this->pregMatch('~\G\s*+' . self::REMOTE_URL_START . '~i', $css, $quote + 1)) {
                 return true;
             }
         }
@@ -1067,9 +1285,36 @@ class Sanitizer
     {
         $css = $this->decodeCssEscapes($css);
         // Replace comments with a space so they can neither glue nor split tokens.
-        $css = $this->pregReplace('~/\*.*?\*/~s', ' ', $css);
+        $css = $this->replaceCssComments($css);
 
         return $css;
+    }
+
+    /**
+     * Replace each CSS comment with a space. An unclosed comment runs to the end
+     * of the input, as it does in a browser.
+     *
+     * This is a linear scan. Without PCRE's JIT, a regex retried the rest of the
+     * input from every unclosed `/*`.
+     *
+     * @param string $css
+     * @return string
+     */
+    protected function replaceCssComments($css)
+    {
+        $output = '';
+        $offset = 0;
+
+        while (($start = strpos($css, '/*', $offset)) !== false) {
+            $output .= substr($css, $offset, $start - $offset) . ' ';
+            $end = strpos($css, '*/', $start + 2);
+            if ($end === false) {
+                return $output;
+            }
+            $offset = $end + 2;
+        }
+
+        return $output . substr($css, $offset);
     }
 
     /**
@@ -1082,16 +1327,25 @@ class Sanitizer
     protected function decodeCssEscapes($css)
     {
         return $this->pregReplaceCallback(
-            '~\\\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\\\(.)~s',
+            // 1. A backslash before a line break continues a string: both vanish.
+            // 2. A hex escape, which swallows one following whitespace character
+            //    (CR LF counts as one).
+            // 3. Any other escaped character stands for itself.
+            '~\\\\(?:\r\n|[\n\r\f])|\\\\([0-9A-Fa-f]{1,6})(?:\r\n|[ \t\r\n\f])?|\\\\(.)~s',
             function ($matches) {
-                if ($matches[1] !== '') {
+                if (isset($matches[1]) && $matches[1] !== '') {
                     $codepoint = hexdec($matches[1]);
-                    if ($codepoint === 0 || $codepoint > 0x10FFFF) {
+                    // Zero, surrogates and values past U+10FFFF are not valid
+                    // characters, and would not be valid UTF-8 either.
+                    if ($codepoint === 0 || $codepoint > 0x10FFFF || ($codepoint >= 0xD800 && $codepoint <= 0xDFFF)) {
                         return "\xEF\xBF\xBD"; // U+FFFD replacement character
                     }
                     return $this->codepointToUtf8($codepoint);
                 }
-                return $matches[2];
+                if (isset($matches[2])) {
+                    return $matches[2];
+                }
+                return '';
             },
             $css
         );

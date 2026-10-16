@@ -48,7 +48,9 @@ class Helper
         if (!is_string($href) || strpos($href, '#') !== 0) {
             return null;
         }
-        return substr($href, 1);
+        // A fragment is percent-decoded before it is matched against ids, so
+        // `#%61` addresses the element with id `a`.
+        return rawurldecode(substr($href, 1));
     }
 
     /**

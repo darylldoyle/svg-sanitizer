@@ -138,10 +138,6 @@ class Resolver
      */
     protected function walkReferences(\DOMElement $element, $nearest, array &$ancestorIds, \SplObjectStorage $useElements)
     {
-        if ($useElements->contains($element)) {
-            $this->addReference($element, $nearest, $ancestorIds);
-        }
-
         $id = null;
         if ($element->hasAttribute('id')) {
             $id = $element->getAttribute('id');
@@ -156,6 +152,14 @@ class Resolver
             } else {
                 $ancestorIds[$id] = true;
             }
+        }
+
+        // Record the reference only now, so a `<use>` with its own id owns it:
+        // rendering `<use id="u" href="#x">` renders `#x`, so anything that uses
+        // `#u` renders `#x` too. Its own id is in $ancestorIds by now, so
+        // `<use id="a" href="#a">` counts as a self reference.
+        if ($useElements->contains($element)) {
+            $this->addReference($element, $nearest, $ancestorIds);
         }
 
         foreach ($element->childNodes as $child) {
