@@ -6,6 +6,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+<!-- On release: rename to [1.0.1] with the date, and link each advisory. -->
+
+This is a security release. Everyone using 1.0.0 or earlier should upgrade.
+The public API has not changed, but some input is now cleaned differently. See
+"Changed" below before you upgrade.
+
+### Security
+
+- Animation elements such as `<animateTransform>` can no longer change a link's
+  `href` after sanitizing. Any `attributeName` that targets an `href` is removed.
+- A document whose DTD still reaches the XML parser is now rejected. That
+  covers DTDs in encodings the pre-parse stripper cannot read, such as UTF-16,
+  and DOCTYPEs hidden inside other DOCTYPEs.
+- The `<use>` limits (`useThreshold()`, `setUseNestingLimit()` and loop
+  detection) now measure the document a browser actually renders, both as XML
+  and when the output is inlined in an HTML page. They are applied after tags
+  and attributes are cleaned. They also now cover `<use>` elements that are
+  nested inside other elements, that carry their own `id`, or that point at a
+  duplicated `id`. They read references the way browsers do, including letter
+  case, namespaces, whitespace and percent-encoding.
+- `removeRemoteReferences(true)` now catches many more ways of writing a remote
+  URL, in attributes and in `<style>`. These include CSS escapes, comments,
+  line continuations and control characters inside URLs, backslashes in place
+  of slashes, and schemes with no slashes. It also covers `image-set()`
+  arguments and quoted strings, which closes the old gap for `image()` and
+  `src()`. The stripped CSS is checked once more the way a browser reads it.
+- Several inputs that took seconds of CPU, or over 100 MB of memory, now take
+  milliseconds. Each affected part of the pipeline now scales roughly
+  linearly with the input:
+  - stripping PHP tags and the `DOCTYPE`
+  - the remote-reference CSS checks
+  - attribute cleaning
+  - the `<use>` reference graph
+  - walking the document
+- `sanitize()` no longer throws. Input it cannot process safely now returns
+  `false`. That includes input that is empty once PHP tags or the `DOCTYPE` are
+  removed, a root element that is not `<svg>`, and a failed regular expression.
+- With `minify(true)`, whitespace is collapsed before the security checks run,
+  so minifying can no longer change a value that was already checked.
+
+### Changed
+
+- **`<use>` limits.** `<use>` elements inside plain groups now count toward
+  `useThreshold()`. Very large legitimate artwork, such as a halftone pattern
+  with more than 1,000 nested copies, can lose the `<use>` elements that
+  reference it. Raise the limit with `useThreshold()` if you need to.
+- **Duplicate ids.** When an `id` appears more than once and a `<use>`
+  references it, the later elements lose their `id`. Browsers only ever
+  resolve the first one. Duplicates that no `<use>` references keep their `id`,
+  so CSS `#id` rules still apply.
+- **Removed spellings.** These are now removed, because an HTML parser turns
+  them into live SVG when the output is inlined:
+  - `<use>` written in another letter case, such as `<USE>`
+  - `<use>` in another namespace
+  - `id` written in another letter case, such as `ID`
+  - any `xlink:href` outside the XLink namespace
+- **Self-references.** An `href` on an element other than `<use>` no longer
+  counts as a self-reference.
+- **Rejected documents.** `sanitize()` now returns `false` in these cases:
+  - a UTF-16 document, or another non-ASCII-compatible encoding, that carries
+    an internal DTD subset
+  - input that is empty once PHP tags or the `DOCTYPE` are removed
+- **`removeRemoteReferences(true)`.** This option now removes more:
+  - every `srcset` attribute, because it is a list of URLs
+  - any attribute holding a quoted remote URL, such as an `aria-label` that
+    quotes a link
+  - a whole `<style>` block when a remote reference would otherwise survive
+- **New issue messages.** `getXmlIssues()` can now report:
+  - `Duplicate id '…'`
+  - `Remote reference removed from 'style'`
+  - `Document is empty`
+  - `Internal DTD subset is not allowed`
+  - `Nested DOCTYPE declaration`
+  - a message for a failed regular expression
+
+  The CLI scanner therefore now reports a file whose only problem was remote
+  CSS in a `<style>` element.
+
+### Fixed
+
+- A CSS escape for a UTF-16 surrogate, such as `\D800`, now decodes to U+FFFD
+  instead of producing invalid UTF-8.
+
+## [1.0.0] - 2026-09-01
+
 ### Security
 
 - Strip the `DOCTYPE`/DTD from the input before parsing. This prevents custom
