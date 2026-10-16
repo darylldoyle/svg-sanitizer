@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100" height="100">
+  <rect id="escapedSlashes" width="10" height="10" fill="url(\2f\2f evil.example/a)"/>
+  <rect id="escapedSlashesUpper" width="10" height="10" fill="url(\2F\2F evil.example/b)"/>
+  <rect id="escapedUrlToken" width="10" height="10" stroke="\75 rl(//evil.example/c)"/>
+  <rect id="escapedBackslash" width="10" height="10" fill="url(/\5c evil.example/d)"/>
+  <image id="backslashXlink" xlink:href="/\evil.example/e.png" width="1" height="1"/>
+  <image id="backslashHref" href="/\evil.example/f.png" width="1" height="1"/>
+  <a id="backslashLink" href="/\evil.example/g"><text>g</text></a>
+  <rect id="localFragment" width="10" height="10" fill="url(#grad)"/>
+  <image id="localPath" href="/local/h.png" width="1" height="1"/>
+  <a id="localLink" href="#frag"><text>i</text></a>
+  <text id="escapedFont" font-family="Foo\2f Bar">j</text>
+</svg>

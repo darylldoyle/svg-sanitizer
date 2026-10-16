@@ -101,10 +101,14 @@ class Resolver
         // skip `<use HrEf="#id">`/`<use xlink:HrEf="#id">` - names that
         // `Sanitizer::cleanHrefAttributes()` normalizes back to `href`/`xlink:href`
         // afterwards, which would hand back a live reference the graph never saw.
+        //
+        // Every `<use>` inside the element counts, however deeply it is nested:
+        // rendering the element renders all of them, so wrapping them in a plain
+        // `<g>` must not hide them from the graph.
         $useNodeName = $this->xPath->createNodeName('use');
         foreach ($this->subjects as $subject) {
             $useElements = $this->xPath->query(
-                $useNodeName,
+                './/' . $useNodeName,
                 $subject->getElement()
             );
 
@@ -116,8 +120,16 @@ class Resolver
                 if ($useId === null || !isset($this->subjects[$useId])) {
                     continue;
                 }
-                $subject->addUse($this->subjects[$useId]);
-                $this->subjects[$useId]->addUsedIn($subject);
+                $referenced = $this->subjects[$useId];
+                // A `<use>` inside the element it references would render itself
+                // forever. That is attacker input, not a programming error, so
+                // remove the `<use>` instead of adding a self edge.
+                if ($referenced === $subject) {
+                    $this->elementsToRemove[] = $useElement;
+                    continue;
+                }
+                $subject->addUse($referenced);
+                $referenced->addUsedIn($subject);
             }
         }
     }

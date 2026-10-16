@@ -7,6 +7,7 @@ use enshrined\svgSanitize\data\AttributeInterface;
 use enshrined\svgSanitize\data\TagInterface;
 use enshrined\svgSanitize\data\XPath;
 use enshrined\svgSanitize\ElementReference\Resolver;
+use enshrined\svgSanitize\Exceptions\RegexException;
 
 /**
  * Class Sanitizer
@@ -220,28 +221,81 @@ class Sanitizer
             return '';
         }
 
-        do {
-            /*
-             * recursively remove php tags because they can be hidden inside tags
-             * i.e. <?p<?php test?>hp echo . ' danger! ';?>
-             */
-            $dirty = preg_replace('/<\?(=|php)(.+?)\?>/i', '', $dirty);
-        } while (preg_match('/<\?(=|php)(.+?)\?>/i', $dirty) != 0);
+        /*
+         * remove php tags, including ones hidden inside other tags
+         * i.e. <?p<?php test?>hp echo . ' danger! ';?>
+         */
+        $dirty = $this->stripPhpTags($dirty);
 
         // Strip any DOCTYPE/DTD before parsing. This prevents custom entity
         // definitions (which can collide with HTML5 named character references)
         // and DTD-defaulted attributes from ever reaching libxml.
         $dirty = $this->removeDoctype($dirty);
+        if ($dirty === false) {
+            $this->xmlIssues = array(array(
+                'message' => 'Nested DOCTYPE declaration',
+                'line' => 0,
+            ));
+            return false;
+        }
 
         $this->resetInternal();
         $this->setUpBefore();
 
+        // Input we cannot process safely (a failed regex, or a document the
+        // reference graph rejects) fails closed instead of throwing.
+        try {
+            $clean = $this->sanitizeDocument($dirty);
+        } catch (RegexException $e) {
+            $this->xmlIssues[] = array(
+                'message' => $e->getMessage(),
+                'line' => 0,
+            );
+            $clean = false;
+        } catch (\LogicException $e) {
+            $this->xmlIssues[] = array(
+                'message' => $e->getMessage(),
+                'line' => 0,
+            );
+            $clean = false;
+        }
+
+        $this->resetAfter();
+
+        return $clean;
+    }
+
+    /**
+     * Parse and clean the document. Expects setUpBefore() to have run.
+     *
+     * @param string $dirty
+     * @return string|false
+     */
+    protected function sanitizeDocument($dirty)
+    {
         $loaded = $this->xmlDocument->loadXML($dirty, $this->getAllowHugeFiles() ? LIBXML_PARSEHUGE : 0);
 
-        // If we couldn't parse the XML then we go no further. Reset and return false
+        // If we couldn't parse the XML then we go no further.
         if (!$loaded) {
             $this->xmlIssues = self::getXmlErrors();
-            $this->resetAfter();
+            return false;
+        }
+
+        // removeDoctype() works on raw bytes, so a DTD can still reach libxml in
+        // an encoding it cannot read (UTF-16, for instance). By now libxml has
+        // already applied the DTD's entities and attribute defaults, so the only
+        // safe answer is to reject the document. A DOCTYPE without an internal
+        // subset (e.g. PUBLIC only) is harmless and still allowed.
+        $doctype = $this->xmlDocument->doctype;
+        if ($doctype !== null && (
+            trim((string) $doctype->internalSubset) !== ''
+            || $doctype->entities->length > 0
+            || $doctype->notations->length > 0
+        )) {
+            $this->xmlIssues[] = array(
+                'message' => 'Internal DTD subset is not allowed',
+                'line' => 0,
+            );
             return false;
         }
 
@@ -261,15 +315,72 @@ class Sanitizer
             $clean = $this->xmlDocument->saveXML($this->xmlDocument, $this->xmlOptions);
         }
 
-        $this->resetAfter();
-
         // Remove any extra whitespaces when minifying
         if ($this->minifyXML) {
-            $clean = preg_replace('/\s+/', ' ', $clean);
+            $clean = $this->pregReplace('/\s+/', ' ', $clean);
         }
 
-        // Return result
         return $clean;
+    }
+
+    /**
+     * Remove `<?php ... ?>` and `<?= ... ?>` blocks, including blocks that only
+     * appear once an inner block has been removed (`<?p<?php a?>hp b?>`).
+     *
+     * This matches what repeatedly applying `/<\?(=|php)(.+?)\?>/i` until nothing
+     * changes would do (the leftmost opener up to the first closer on the same
+     * line), but in a single linear pass. The regex loop needed a full pass per
+     * nesting level, and the regex itself was quadratic on long lines without JIT.
+     *
+     * @param string $dirty
+     * @return string
+     */
+    protected function stripPhpTags($dirty)
+    {
+        // A tag can only be revealed by removing another one, so input without
+        // any opener has nothing to strip.
+        if (stripos($dirty, '<?php') === false && strpos($dirty, '<?=') === false) {
+            return $dirty;
+        }
+
+        $length = strlen($dirty);
+        // The output is never longer than the input, so write into a buffer of
+        // that size. Removing a block then just moves the write position back.
+        $buffer = str_repeat(' ', $length);
+        $size = 0;
+        // Where the leftmost unclosed opener on the current line starts, and
+        // where its content begins.
+        $openAt = -1;
+        $contentAt = -1;
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $dirty[$i];
+            $buffer[$size++] = $char;
+
+            if ($char === "\n") {
+                // '.' does not match a newline, so a block never spans lines.
+                $openAt = -1;
+            } elseif ($char === '>') {
+                // A closer needs at least one character of content before it.
+                if ($openAt >= 0 && $size - 2 > $contentAt && $buffer[$size - 2] === '?') {
+                    $size = $openAt;
+                    $openAt = -1;
+                }
+            } elseif ($openAt < 0) {
+                if (($char === 'p' || $char === 'P')
+                    && $size >= 5
+                    && strtolower(substr($buffer, $size - 5, 5)) === '<?php'
+                ) {
+                    $openAt = $size - 5;
+                    $contentAt = $size;
+                } elseif ($char === '=' && $size >= 3 && $buffer[$size - 3] === '<' && $buffer[$size - 2] === '?') {
+                    $openAt = $size - 3;
+                    $contentAt = $size;
+                }
+            }
+        }
+
+        return substr($buffer, 0, $size);
     }
 
     /**
@@ -279,8 +390,13 @@ class Sanitizer
      * The internal subset is scanned with balanced brackets so that a `>`
      * appearing inside an entity value cannot prematurely terminate the match.
      *
+     * Removing one DOCTYPE can join the text around it into a new one
+     * (`<!<!DOCTYPE x>DOCTYPE svg [...]>`). Rather than rescanning, which would
+     * be quadratic on deep nesting, any DOCTYPE left in the output means the
+     * input is rejected.
+     *
      * @param string $dirty
-     * @return string
+     * @return string|false
      */
     protected function removeDoctype($dirty)
     {
@@ -336,7 +452,13 @@ class Sanitizer
             $offset = $i;
         }
 
-        return $output . substr($dirty, $offset);
+        $output .= substr($dirty, $offset);
+
+        if (stripos($output, '<!DOCTYPE') !== false) {
+            return false;
+        }
+
+        return $output;
     }
 
     /**
@@ -552,8 +674,12 @@ class Sanitizer
                 $value = ($attr !== null && isset($attr->value)) ? $attr->value : '';
 
                 // A remote url()/@import reference, or a value that is itself a remote
-                // URL (e.g. a bare href/src).
-                $isRemote = $this->hasRemoteReference($value) || $this->isRemoteUrl($value);
+                // URL (e.g. a bare href/src). Presentation attributes such as `fill`
+                // are parsed as CSS, so check them with CSS escapes resolved too
+                // (`url(\2f\2f host)` is `url(//host)`).
+                $isRemote = $this->hasRemoteReference($value)
+                    || $this->isRemoteUrl($value)
+                    || $this->hasRemoteReference($this->normalizeCss($value));
 
                 // The style attribute is CSS, so resolve escapes/comments and reuse the
                 // same remote-token detection used for <style> elements (this also
@@ -701,7 +827,7 @@ class Sanitizer
      */
     protected function removeNonPrintableCharacters($value)
     {
-        return trim(preg_replace('/[^ -~]/xu','',$value));
+        return trim($this->pregReplace('/[^ -~]/xu','',$value));
     }
 
     /**
@@ -719,11 +845,11 @@ class Sanitizer
     {
         $value = $this->removeNonPrintableCharacters($value);
 
-        if (preg_match('~url\(\s*[\'"]?\s*((?:https?|ftp|file):)?//~xi', $value)) {
+        if ($this->pregMatch('~url\(\s*[\'"]?\s*((?:https?|ftp|file):)?[/\\\\]{2}~xi', $value)) {
             return true;
         }
 
-        if (preg_match('~@import\s+(?:url\(\s*)?[\'"]?\s*((?:https?|ftp|file):)?//~xi', $value)) {
+        if ($this->pregMatch('~@import\s+(?:url\(\s*)?[\'"]?\s*((?:https?|ftp|file):)?[/\\\\]{2}~xi', $value)) {
             return true;
         }
 
@@ -734,7 +860,9 @@ class Sanitizer
      * Is the value itself a remote URL (a bare href/src rather than a url() wrapper)?
      *
      * Flags absolute (`http(s)`/`ftp`/`file`) and protocol-relative (`//`) URLs while
-     * leaving local (`/x`) and fragment (`#x`) references untouched.
+     * leaving local (`/x`) and fragment (`#x`) references untouched. Browsers read
+     * a backslash as a slash in these URLs, so `/\host` and `\\host` count as
+     * protocol-relative too.
      *
      * @param $value
      * @return bool
@@ -743,7 +871,7 @@ class Sanitizer
     {
         $value = $this->removeNonPrintableCharacters($value);
 
-        return (bool) preg_match('~^\s*(?:(?:https?|ftp|file):)?//~i', $value);
+        return $this->pregMatch('~^\s*(?:(?:https?|ftp|file):)?[/\\\\]{2}~i', $value);
     }
 
     /**
@@ -790,12 +918,143 @@ class Sanitizer
         // or end of input otherwise. A CSS tokenizer closes an unclosed url()/
         // function token implicitly and still fetches, so requiring a closing paren
         // would let a value that omits it slip past.
-        $css = preg_replace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?//[^)}\r\n]*\)?~i', '', $css);
-        $css = preg_replace('~@import\b[^;]*;?~i', '', $css);
+        $css = $this->pregReplace('~url\(\s*[\'"]?\s*(?:(?:https?|ftp|file):)?[/\\\\]{2}[^)}\r\n]*\)?~i', '', $css);
+        $css = $this->pregReplace('~@import\b[^;]*;?~i', '', $css);
         // image-set() accepts a bare remote string with no url() token of its own.
-        $css = preg_replace('~(?:-webkit-)?image-set\s*\([^)}\r\n]*[\'"]\s*(?:(?:https?|ftp|file):)?//[^)}\r\n]*\)?~i', '', $css);
+        $css = $this->stripRemoteImageSets($css);
 
         return $css;
+    }
+
+    /**
+     * Remove every `image-set(...)` / `-webkit-image-set(...)` whose arguments hold
+     * a quoted remote URL. Like url(), the arguments run to the first `)`, `}` or
+     * line break, so an unclosed one is still caught.
+     *
+     * This is a linear scan. A regex here rescanned the rest of the stylesheet
+     * from every `image-set(`, which was quadratic on many unclosed tokens.
+     *
+     * @param string $css
+     * @return string
+     */
+    protected function stripRemoteImageSets($css)
+    {
+        $output = '';
+        $offset = 0;
+        $length = strlen($css);
+
+        while (($start = stripos($css, 'image-set', $offset)) !== false) {
+            $cursor = $start + strlen('image-set');
+            $cursor += strspn($css, " \t\n\r\f\v", $cursor);
+
+            if ($cursor >= $length || $css[$cursor] !== '(') {
+                $output .= substr($css, $offset, $cursor - $offset);
+                $offset = $cursor;
+                continue;
+            }
+
+            $argumentsStart = $cursor + 1;
+            $argumentsEnd = $argumentsStart + strcspn($css, ")}\r\n", $argumentsStart);
+
+            if (!$this->hasQuotedRemoteUrl($css, $argumentsStart, $argumentsEnd)) {
+                // Any later image-set( before $argumentsEnd shares this same
+                // argument tail, so it cannot hold a remote string either.
+                $output .= substr($css, $offset, $argumentsEnd - $offset);
+                $offset = $argumentsEnd;
+                continue;
+            }
+
+            $removeFrom = $start;
+            if ($start - 8 >= $offset && strtolower(substr($css, $start - 8, 8)) === '-webkit-') {
+                $removeFrom = $start - 8;
+            }
+
+            $output .= substr($css, $offset, $removeFrom - $offset);
+            $offset = ($argumentsEnd < $length && $css[$argumentsEnd] === ')') ? $argumentsEnd + 1 : $argumentsEnd;
+        }
+
+        return $output . substr($css, $offset);
+    }
+
+    /**
+     * Does any quote between $from and $to open a remote URL?
+     *
+     * @param string $css
+     * @param int $from
+     * @param int $to
+     * @return bool
+     */
+    protected function hasQuotedRemoteUrl($css, $from, $to)
+    {
+        for ($quote = $from; $quote < $to; $quote++) {
+            $quote += strcspn($css, '\'"', $quote, $to - $quote);
+            if ($quote >= $to) {
+                break;
+            }
+            if ($this->pregMatch('~\G\s*(?:(?:https?|ftp|file):)?[/\\\\]{2}~i', $css, $quote + 1)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * preg_replace() that throws instead of returning null when PCRE fails.
+     *
+     * @param string $pattern
+     * @param string $replacement
+     * @param string $subject
+     * @return string
+     * @throws RegexException
+     */
+    protected function pregReplace($pattern, $replacement, $subject)
+    {
+        $result = preg_replace($pattern, $replacement, $subject);
+        if ($result === null) {
+            throw new RegexException('Regular expression failed (PCRE error ' . preg_last_error() . ')');
+        }
+
+        return $result;
+    }
+
+    /**
+     * preg_replace_callback() that throws instead of returning null when PCRE fails.
+     *
+     * @param string $pattern
+     * @param callable $callback
+     * @param string $subject
+     * @return string
+     * @throws RegexException
+     */
+    protected function pregReplaceCallback($pattern, $callback, $subject)
+    {
+        $result = preg_replace_callback($pattern, $callback, $subject);
+        if ($result === null) {
+            throw new RegexException('Regular expression failed (PCRE error ' . preg_last_error() . ')');
+        }
+
+        return $result;
+    }
+
+    /**
+     * preg_match() that throws instead of returning false when PCRE fails.
+     *
+     * @param string $pattern
+     * @param string $subject
+     * @param int $offset
+     * @return bool
+     * @throws RegexException
+     */
+    protected function pregMatch($pattern, $subject, $offset = 0)
+    {
+        $matches = array();
+        $result = preg_match($pattern, $subject, $matches, 0, $offset);
+        if ($result === false) {
+            throw new RegexException('Regular expression failed (PCRE error ' . preg_last_error() . ')');
+        }
+
+        return $result === 1;
     }
 
     /**
@@ -808,7 +1067,7 @@ class Sanitizer
     {
         $css = $this->decodeCssEscapes($css);
         // Replace comments with a space so they can neither glue nor split tokens.
-        $css = preg_replace('~/\*.*?\*/~s', ' ', $css);
+        $css = $this->pregReplace('~/\*.*?\*/~s', ' ', $css);
 
         return $css;
     }
@@ -822,7 +1081,7 @@ class Sanitizer
      */
     protected function decodeCssEscapes($css)
     {
-        return preg_replace_callback(
+        return $this->pregReplaceCallback(
             '~\\\\([0-9A-Fa-f]{1,6})[ \t\r\n\f]?|\\\\(.)~s',
             function ($matches) {
                 if ($matches[1] !== '') {
