@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-<!-- On release: rename to [1.0.1] with the date, and link each advisory. -->
+<!-- On release: rename to [1.1.0] with the date, and link each advisory. -->
 
 This is a security release. Everyone using 1.0.0 or earlier should upgrade.
 The public API has not changed, but some input is now cleaned differently. See
