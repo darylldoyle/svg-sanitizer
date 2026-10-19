@@ -86,6 +86,27 @@ class Sanitizer
     const MAX_XML_ISSUES = 1000;
 
     /**
+     * The most attributes one element may carry. Real SVG uses a few dozen at
+     * most. libxml before 2.10 parses one element's attributes in quadratic
+     * time, so input past this limit is rejected before it is parsed.
+     */
+    const MAX_ATTRIBUTES_PER_ELEMENT = 4096;
+
+    const SVG_NAMESPACE_URI = 'http://www.w3.org/2000/svg';
+
+    /**
+     * Attributes whose values are never treated as URLs, after DOMPurify's
+     * URI_SAFE_ATTRIBUTES. Every other attribute, except `data-*` and `aria-*`,
+     * is checked for script and document URLs.
+     *
+     * @var string[]
+     */
+    protected static $inertAttributes = array(
+        'alt', 'class', 'for', 'id', 'label', 'name', 'pattern', 'placeholder',
+        'role', 'summary', 'title', 'value', 'style', 'xmlns',
+    );
+
+    /**
      * @var Resolver
      */
     protected $elementReferenceResolver;
@@ -310,6 +331,15 @@ class Sanitizer
             return false;
         }
 
+        // Some input is unsafe to hand to libxml at all: libxml before 2.10 parses
+        // one element's attributes in quadratic time, and an encoded DTD can be
+        // expanded before it is rejected.
+        $problem = $this->findProblemBeforeParsing($dirty);
+        if ($problem !== null) {
+            $this->addXmlIssue($problem, 0);
+            return false;
+        }
+
         $this->resetInternal();
         $this->setUpBefore();
 
@@ -336,7 +366,13 @@ class Sanitizer
      */
     protected function sanitizeDocument($dirty)
     {
-        $loaded = $this->xmlDocument->loadXML($dirty, $this->getAllowHugeFiles() ? LIBXML_PARSEHUGE : 0);
+        // LIBXML_NONET: never fetch anything over the network while parsing.
+        // External entities are already not loaded; this states it outright.
+        $options = LIBXML_NONET;
+        if ($this->getAllowHugeFiles()) {
+            $options |= LIBXML_PARSEHUGE;
+        }
+        $loaded = $this->xmlDocument->loadXML($dirty, $options);
 
         // If we couldn't parse the XML then we go no further.
         if (!$loaded) {
@@ -358,6 +394,15 @@ class Sanitizer
             || $doctype->notations->length > 0
         )) {
             $this->addXmlIssue('Internal DTD subset is not allowed', 0);
+            return false;
+        }
+
+        // An `<svg>` root in some other namespace is not SVG to an XML reader, but
+        // an HTML parser ignores `xmlns` and makes it live SVG when the output is
+        // inlined. Accept the SVG namespace, or none.
+        $rootNamespace = (string) $this->xmlDocument->documentElement->namespaceURI;
+        if ($rootNamespace !== '' && $rootNamespace !== self::SVG_NAMESPACE_URI) {
+            $this->addXmlIssue('Root element is not in the SVG namespace', 0);
             return false;
         }
 
@@ -507,6 +552,238 @@ class Sanitizer
         }
 
         return substr($buffer, 0, $size);
+    }
+
+    /**
+     * Check the raw input for anything that is unsafe to hand to libxml.
+     *
+     * @param string $dirty
+     * @return string|null The reason to reject the input, or null if it is fine
+     */
+    protected function findProblemBeforeParsing($dirty)
+    {
+        $markup = $this->readMarkupBeforeParsing($dirty);
+        if ($markup === null) {
+            return 'Unsupported document encoding';
+        }
+
+        // removeDoctype() has already removed every DOCTYPE from input it can
+        // read as bytes. In UTF-16 and UTF-32 it cannot, so look here.
+        if ($markup['decoded'] && $this->hasInternalDtdSubset($markup['text'])) {
+            return 'Internal DTD subset is not allowed';
+        }
+
+        if ($this->hasElementWithTooManyAttributes($markup['text'])) {
+            return 'Too many attributes on one element';
+        }
+
+        return null;
+    }
+
+    /**
+     * Read the input's markup the way libxml will, as ASCII.
+     *
+     * UTF-16 and UTF-32 input is decoded one code unit at a time: ASCII stays,
+     * and anything else becomes `x`, so a byte inside a non-ASCII character can
+     * never pass for markup. ASCII-compatible encodings are read as they are.
+     * Anything else returns null: EBCDIC, UTF-7, an encoding that is not known
+     * to be ASCII-compatible, or a declaration that does not match the bytes.
+     *
+     * @param string $dirty
+     * @return array{text: string, decoded: bool}|null
+     */
+    protected function readMarkupBeforeParsing($dirty)
+    {
+        // Byte order marks, then the patterns libxml uses to spot `<?xml` in
+        // each encoding when there is no byte order mark.
+        $signatures = array(
+            array("\x00\x00\xFE\xFF", 4, 4, true),
+            array("\xFF\xFE\x00\x00", 4, 4, false),
+            array("\xFE\xFF", 2, 2, true),
+            array("\xFF\xFE", 2, 2, false),
+            array("\x00\x00\x00\x3C", 0, 4, true),
+            array("\x3C\x00\x00\x00", 0, 4, false),
+            array("\x00\x3C\x00\x3F", 0, 2, true),
+            array("\x3C\x00\x3F\x00", 0, 2, false),
+        );
+
+        $unitSize = 0;
+        $bigEndian = false;
+        $start = 0;
+        foreach ($signatures as $signature) {
+            if (strncmp($dirty, $signature[0], strlen($signature[0])) === 0) {
+                list(, $start, $unitSize, $bigEndian) = $signature;
+                break;
+            }
+        }
+
+        if ($unitSize === 0) {
+            // EBCDIC `<?xm`. Its markup is not ASCII, so it cannot be checked.
+            if (strncmp($dirty, "\x4C\x6F\xA7\x94", 4) === 0) {
+                return null;
+            }
+            $declared = $this->findDeclaredEncoding($dirty);
+            if ($declared !== null && !$this->isAsciiCompatibleEncoding($declared)) {
+                return null;
+            }
+
+            return array('text' => $dirty, 'decoded' => false);
+        }
+
+        $length = strlen($dirty);
+        $units = (int) (($length - $start) / $unitSize);
+        $text = str_repeat('x', $units);
+        for ($i = 0, $offset = $start; $i < $units; $i++, $offset += $unitSize) {
+            $unit = 0;
+            for ($byte = 0; $byte < $unitSize; $byte++) {
+                $value = ord($dirty[$offset + ($bigEndian ? $byte : $unitSize - 1 - $byte)]);
+                $unit = ($unit << 8) | $value;
+            }
+            if ($unit < 0x80) {
+                $text[$i] = chr($unit);
+            }
+        }
+
+        $declared = $this->findDeclaredEncoding($text);
+        if ($declared !== null && !preg_match('/^(?:utf-?(?:16|32)(?:[bl]e)?|ucs-?[24]|iso-10646-ucs-[24])$/i', $declared)) {
+            return null;
+        }
+
+        return array('text' => $text, 'decoded' => true);
+    }
+
+    /**
+     * The encoding named in the XML declaration, if there is one.
+     *
+     * @param string $markup
+     * @return string|null
+     */
+    protected function findDeclaredEncoding($markup)
+    {
+        if (strncmp(ltrim($markup, "\xEF\xBB\xBF"), '<?xml', 5) !== 0) {
+            return null;
+        }
+        $end = strpos($markup, '?>');
+        $declaration = substr($markup, 0, $end === false ? 200 : $end);
+        // This runs before parsing, outside the try block in sanitize(), so use
+        // preg_match() directly. The subject is one short declaration.
+        if (preg_match('/\bencoding\s*=\s*(["\'])([^"\']*)\1/', $declaration, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[2];
+    }
+
+    /**
+     * Is this an encoding whose markup characters are plain ASCII bytes?
+     *
+     * @param string $encoding
+     * @return bool
+     */
+    protected function isAsciiCompatibleEncoding($encoding)
+    {
+        return (bool) preg_match(
+            '/^(?:utf-?8|(?:us-)?ascii|iso[-_]?8859[-_]?\d+|iso[-_]?646[-_\w]*|latin-?\d+|l\d'
+            . '|(?:windows|cp)-?(?:125\d|874|932|936|949|950)|koi8-?[ru]|shift[-_]?jis|sjis|windows-31j'
+            . '|euc-?(?:jp|kr|cn|tw)|gb2312|gbk|gb18030|big5(?:-hkscs)?|tis-?620)$/i',
+            $encoding
+        );
+    }
+
+    /**
+     * Does a DOCTYPE in this markup carry an internal subset (`[...]`)?
+     *
+     * @param string $markup
+     * @return bool
+     */
+    protected function hasInternalDtdSubset($markup)
+    {
+        $lowerMarkup = strtolower($markup);
+        $length = strlen($markup);
+        $offset = 0;
+        while (($start = strpos($lowerMarkup, '<!doctype', $offset)) !== false) {
+            for ($i = $start + 9; $i < $length; $i++) {
+                $i += strcspn($markup, "\"'[>", $i);
+                if ($i >= $length) {
+                    break;
+                }
+                if ($markup[$i] === '[') {
+                    return true;
+                }
+                if ($markup[$i] === '>') {
+                    break;
+                }
+                $close = strpos($markup, $markup[$i], $i + 1);
+                if ($close === false) {
+                    return false;
+                }
+                $i = $close;
+            }
+            $offset = $i + 1;
+        }
+
+        return false;
+    }
+
+    /**
+     * Does any element carry more than MAX_ATTRIBUTES_PER_ELEMENT attributes?
+     *
+     * Counts each `=` in a start tag outside quoted values, and skips comments,
+     * CDATA sections, processing instructions, end tags and declarations. Text
+     * is never scanned, because `<` cannot appear in it unescaped. Linear in the
+     * input.
+     *
+     * @param string $markup
+     * @return bool
+     */
+    protected function hasElementWithTooManyAttributes($markup)
+    {
+        $length = strlen($markup);
+        $offset = 0;
+        while (($start = strpos($markup, '<', $offset)) !== false) {
+            $next = $start + 1;
+            $skipTo = null;
+            if (substr($markup, $next, 3) === '!--') {
+                $skipTo = '-->';
+            } elseif (substr($markup, $next, 8) === '![CDATA[') {
+                $skipTo = ']]>';
+            } elseif ($next < $length && $markup[$next] === '?') {
+                $skipTo = '?>';
+            } elseif ($next < $length && ($markup[$next] === '!' || $markup[$next] === '/')) {
+                $skipTo = '>';
+            }
+
+            if ($skipTo !== null) {
+                $end = strpos($markup, $skipTo, $next);
+                if ($end === false) {
+                    return false;
+                }
+                $offset = $end + strlen($skipTo);
+                continue;
+            }
+
+            $attributes = 0;
+            for ($i = $next; $i < $length; $i++) {
+                $i += strcspn($markup, "\"'=>", $i);
+                if ($i >= $length || $markup[$i] === '>') {
+                    break;
+                }
+                if ($markup[$i] === '=') {
+                    if (++$attributes > self::MAX_ATTRIBUTES_PER_ELEMENT) {
+                        return true;
+                    }
+                    continue;
+                }
+                $close = strpos($markup, $markup[$i], $i + 1);
+                if ($close === false) {
+                    return false;
+                }
+                $i = $close;
+            }
+            $offset = $i + 1;
+        }
+
+        return false;
     }
 
     /**
@@ -862,11 +1139,18 @@ class Sanitizer
                 continue;
             }
 
-            // `src` and `srcset` hold URLs. When the output is inlined in HTML, an
-            // `<image>` inside `<title>` or `<desc>` becomes an `<img>`, so remove
-            // script and document URLs from them, in every configuration.
+            // Remove script and document URLs from every attribute that could hold
+            // a URL, in every configuration, as DOMPurify does. Some attributes
+            // are live today: when the output is inlined in HTML, an `<image>`
+            // inside `<title>` or `<desc>` becomes an `<img>` that uses `src` and
+            // `srcset`. Checking the rest means a tag allowed later cannot
+            // activate a value that was already approved. `srcset` is a list, so
+            // each of its candidates is checked.
             $lowerAttrName = strtolower($attrName);
-            if (($lowerAttrName === 'src' || $lowerAttrName === 'srcset') && $this->hasUnsafeUrlScheme($attribute->value)) {
+            $mayHoldUrl = !in_array($lowerAttrName, self::$inertAttributes, true)
+                && !$this->isAriaAttribute($lowerAttrName)
+                && !$this->isDataAttribute($lowerAttrName);
+            if ($mayHoldUrl && $this->hasUnsafeUrlScheme($attribute->value, $lowerAttrName === 'srcset')) {
                 $element->removeAttributeNode($attribute);
                 $this->addXmlIssue('Suspicious attribute \'' . $attrName . '\'', $element->getLineNo());
                 continue;
@@ -1072,20 +1356,21 @@ class Sanitizer
     }
 
     /**
-     * Does a URL, or any candidate in a `srcset` list, use a script scheme
-     * (`javascript:`, `vbscript:`) or a `data:` URL that is not an image?
+     * Does a URL, or with $isList any candidate in a `srcset` list, use a script
+     * scheme (`javascript:`, `vbscript:`) or a `data:` URL that is not an image?
      *
      * The URL parser drops tabs and line breaks anywhere in a URL and trims
      * control characters, so they are removed before matching.
      *
      * @param string $value
+     * @param bool $isList
      * @return bool
      */
-    protected function hasUnsafeUrlScheme($value)
+    protected function hasUnsafeUrlScheme($value, $isList = false)
     {
         $value = $this->pregReplace('/[\x00-\x1F\x7F]/', '', $value);
 
-        return $this->pregMatch('~(?:^|,)\s*+(?:(?:java|vb)script:|data:(?!image/))~i', $value);
+        return $this->pregMatch('~' . ($isList ? '(?:^|,)' : '^') . '\s*+(?:(?:java|vb)script:|data:(?!image/))~i', $value);
     }
 
     /**

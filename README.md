@@ -34,11 +34,22 @@ $cleanSVG = $sanitizer->sanitize($dirtySVG);
 
 This will either return a sanitized SVG/XML string or boolean `false` if XML parsing failed (usually due to a badly formatted file).
 
+It also returns `false` for input it will not hand to the XML parser:
+
+- an element with more than 4,096 attributes
+- an internal DTD in UTF-16 or UTF-32 input
+- an encoding whose markup is not plain ASCII, such as EBCDIC or UTF-7
+- an `<svg>` root in a namespace other than SVG
+
+`getXmlIssues()` says why.
+
 ## Options
 
 You may pass your own whitelist of tags and attributes by using the `Sanitizer::setAllowedTags` and `Sanitizer::setAllowedAttrs` methods respectively.
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
+
+`<use>` is allowed by default, behind limits on how far references can expand (`useThreshold()`) and nest (`setUseNestingLimit()`). If you don't need it, for example because you inline untrusted SVG into your pages, leave `use` out of your tag allowlist to remove that whole area.
 
 ## Remove remote references
 

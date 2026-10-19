@@ -2318,16 +2318,17 @@ class SanitizerTest extends TestCase
     /**
      * One element with many attributes. Reading or removing each attribute by
      * name walks the element's attribute list from the start, which made the
-     * attribute pass quadratic.
+     * attribute pass quadratic. Elements with more than 4,096 attributes are
+     * now rejected before parsing, so these inputs return false, quickly.
      *
-     * @return array<string, array{0: string, 1: bool, 2: int}>
+     * @return array<string, array{0: string, 1: bool}>
      */
     public static function manyAttributesDataProvider()
     {
         return [
-            'allowed data attributes, remote references removed' => ['data-a%d="x"', true, 60000],
-            'disallowed attributes, default settings' => ['bad-a%d="x"', false, 0],
-            'href-like data attributes, default settings' => ['data-href%d="#a"', false, 60000],
+            'allowed data attributes, remote references removed' => ['data-a%d="x"', true],
+            'disallowed attributes, default settings' => ['bad-a%d="x"', false],
+            'href-like data attributes, default settings' => ['data-href%d="#a"', false],
         ];
     }
 
@@ -2335,7 +2336,7 @@ class SanitizerTest extends TestCase
      * @test
      * @dataProvider manyAttributesDataProvider
      */
-    public function manyAttributesOnOneElementAreSanitizedQuickly($template, $removeRemoteReferences, $expectedKept)
+    public function manyAttributesOnOneElementAreSanitizedQuickly($template, $removeRemoteReferences)
     {
         $attributes = '';
         for ($i = 0; $i < 60000; $i++) {
@@ -2350,12 +2351,7 @@ class SanitizerTest extends TestCase
         $elapsed = microtime(true) - $started;
 
         self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
-        self::assertTrue(is_string($cleanData));
-
-        $document = new \DOMDocument();
-        $document->loadXML($cleanData);
-        $rect = $document->getElementsByTagName('rect')->item(0);
-        self::assertSame($expectedKept, $rect->attributes->length, 'allowed attributes stay and disallowed ones go');
+        self::assertFalse($cleanData, 'more than 4,096 attributes on one element is rejected');
     }
 
     /**
@@ -2703,18 +2699,19 @@ class SanitizerTest extends TestCase
     /**
      * Every graph edge used to read the target's `id` again, which walks the
      * element's attributes. Many attributes before the `id`, times many
-     * references, was quadratic.
+     * references, was quadratic. The attribute count stays under the
+     * 4,096-per-element limit, so the references carry the load.
      *
      * @test
      */
     public function manyAttributesBeforeAReferencedIdAreHandledQuickly()
     {
         $attributes = '';
-        for ($i = 0; $i < 40000; $i++) {
+        for ($i = 0; $i < 4000; $i++) {
             $attributes .= ' data-a' . $i . '="x"';
         }
         $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . ' id="t"/>'
-            . '<g id="h">' . str_repeat('<use href="#t"/>', 40000) . '</g></svg>';
+            . '<g id="h">' . str_repeat('<use href="#t"/>', 60000) . '</g></svg>';
 
         $sanitizer = new Sanitizer();
         $started = microtime(true);
@@ -2932,6 +2929,324 @@ class SanitizerTest extends TestCase
         self::assertSame('', $sanitizer->sanitize(''));
         self::assertSame([], $sanitizer->getXmlIssues());
         self::assertFalse($sanitizer->sanitize('0'));
+    }
+
+    /**
+     * Before libxml 2.10, parsing one element's attributes is quadratic, so
+     * the input is checked before parsing. An element with more attributes
+     * than any real SVG uses is rejected.
+     *
+     * @test
+     */
+    public function anElementWithTooManyAttributesIsRejectedBeforeParsing()
+    {
+        $attributes = '';
+        for ($i = 0; $i < 60000; $i++) {
+            $attributes .= ' bad-a' . $i . '="x"';
+        }
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . '/></svg>');
+        $elapsed = microtime(true) - $started;
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertFalse($cleanData);
+        self::assertSame('Too many attributes on one element', $issues[0]['message']);
+        self::assertTrue($elapsed < 0.5, sprintf('took %.2fs', $elapsed));
+    }
+
+    /**
+     * The attribute limit sits at 4,096 per element.
+     *
+     * @return array<string, array{0: int, 1: bool}>
+     */
+    public static function attributeLimitDataProvider()
+    {
+        return [
+            'at the limit' => [4096, true],
+            'one past the limit' => [4097, false],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider attributeLimitDataProvider
+     */
+    public function theAttributeLimitIsFourThousandNinetySix($count, $accepted)
+    {
+        $attributes = '';
+        for ($i = 0; $i < $count; $i++) {
+            $attributes .= ' data-a' . $i . '="x"';
+        }
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize('<svg><rect' . $attributes . '/></svg>');
+
+        self::assertSame($accepted, is_string($cleanData));
+    }
+
+    /**
+     * The count must not be fooled by encoding, and must not count `=` that is
+     * not an attribute: inside a quoted value, a comment or a CDATA section.
+     *
+     * @test
+     */
+    public function theAttributeLimitCountsOnlyRealAttributes()
+    {
+        $attributes = '';
+        for ($i = 0; $i < 5000; $i++) {
+            $attributes .= ' bad-a' . $i . '="x"';
+        }
+        $sanitizer = new Sanitizer();
+        self::assertFalse(
+            $sanitizer->sanitize(self::toUtf16('<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . '/></svg>', false, true)),
+            'UTF-16 input is counted too'
+        );
+
+        $equals = str_repeat('a=1 ', 5000);
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><!-- ' . $equals . ' --><style><![CDATA[' . $equals . ']]></style>'
+            . '<rect data-x="' . $equals . '" width="1" height="1"/></svg>';
+        self::assertTrue(is_string($sanitizer->sanitize($svg)), 'quoted values, comments and CDATA are not attributes');
+    }
+
+    /**
+     * The byte-level DOCTYPE stripper cannot read UTF-16 or UTF-32, so an
+     * internal DTD in that input reached the parser. With huge-file parsing on,
+     * older libxml expanded its entities before the document was rejected.
+     *
+     * @test
+     */
+    public function encodedInternalDtdIsRejectedBeforeParsing()
+    {
+        $dtd = '<!ENTITY e0 "1234567890">';
+        for ($level = 1; $level <= 7; $level++) {
+            $dtd .= '<!ENTITY e' . $level . ' "' . str_repeat('&e' . ($level - 1) . ';', 10) . '">';
+        }
+        $svg = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE svg [' . $dtd . ']>'
+            . '<svg xmlns="http://www.w3.org/2000/svg"><a title="&e7;&e7;"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->setAllowHugeFiles(true);
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize(self::toUtf16($svg, false, true));
+        $elapsed = microtime(true) - $started;
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertFalse($cleanData);
+        self::assertSame('Internal DTD subset is not allowed', $issues[0]['message']);
+        self::assertTrue($elapsed < 0.5, sprintf('took %.2fs', $elapsed));
+    }
+
+    /**
+     * Encodings whose markup is not ASCII bytes, or not UTF-16/UTF-32, cannot be
+     * checked before parsing, and no SVG tool writes them, so they are rejected.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function uncheckableEncodingDataProvider()
+    {
+        $body = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>';
+
+        return [
+            'declared UTF-7' => ['<?xml version="1.0" encoding="UTF-7"?>' . $body],
+            'declared EBCDIC code page' => ['<?xml version="1.0" encoding="IBM037"?>' . $body],
+            'EBCDIC signature' => ["\x4C\x6F\xA7\x94\x93\x40\xA5\x85\x99\xA2\x89\x96\x95\x7E\x7F\xF1\x4B\xF0\x7F\x6F\x6E"],
+            'ASCII bytes declaring UTF-16' => ['<?xml version="1.0" encoding="UTF-16"?>' . $body],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider uncheckableEncodingDataProvider
+     */
+    public function uncheckableEncodingsAreRejected($input)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($input);
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertFalse($cleanData);
+        self::assertSame('Unsupported document encoding', $issues[0]['message']);
+    }
+
+    /**
+     * Regression guard: common ASCII-compatible encodings keep working.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function supportedEncodingDataProvider()
+    {
+        return [
+            'UTF-8' => ['UTF-8'],
+            'ISO-8859-1' => ['ISO-8859-1'],
+            'windows-1252' => ['windows-1252'],
+            'US-ASCII' => ['US-ASCII'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider supportedEncodingDataProvider
+     */
+    public function supportedEncodingsStillSanitize($encoding)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(
+            '<?xml version="1.0" encoding="' . $encoding . '"?><svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Any attribute that is not known to be inert is checked for script and
+     * document URLs, as DOMPurify does, so a tag added later cannot activate
+     * a value that was already approved. Inert text attributes such as
+     * `title` keep their value.
+     *
+     * @test
+     */
+    public function unsafeUrlSchemesAreRemovedFromEveryAttributeThatCouldHoldAUrl()
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><a poster="javascript:alert(1)" action="data:text/html,x" title="Data: 5, javascript: notes"><text>x</text></a></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'poster='), 'a script URL in poster should be removed');
+        self::assertTrue(false === strpos($cleanData, 'action='), 'an HTML data: URL in action should be removed');
+        self::assertTrue(false !== strpos($cleanData, 'title="Data: 5, javascript: notes"'), 'an inert text attribute keeps its value');
+    }
+
+    /**
+     * An `<svg>` root in some other namespace is not SVG to an XML reader, but
+     * an HTML parser ignores `xmlns` and makes it live SVG when inlined.
+     *
+     * @test
+     */
+    public function anSvgRootInAnotherNamespaceIsRejected()
+    {
+        $sanitizer = new Sanitizer();
+
+        self::assertFalse($sanitizer->sanitize('<svg xmlns="urn:not-svg"><rect width="1" height="1"/></svg>'));
+        self::assertTrue(is_string($sanitizer->sanitize('<svg><rect width="1" height="1"/></svg>')), 'a root with no namespace still works');
+    }
+
+    /**
+     * Property test, ported from a review harness: random elements built from
+     * the default allowlists, with risky values, under four option sets. Every
+     * result must be a string, raise nothing, stay the same when sanitized
+     * again, and contain no script element, event handler or script URL in an
+     * attribute that can hold a URL.
+     *
+     * @test
+     */
+    public function generatedAllowlistMarkupKeepsTheSanitizerGuarantees()
+    {
+        mt_srand(0x5A17);
+
+        $prototype = new Sanitizer();
+        $tags = array_values(array_filter($prototype->getAllowedTags(), function ($tag) {
+            return $tag !== '#text' && $tag !== 'svg';
+        }));
+        $attributes = array_values(array_filter($prototype->getAllowedAttrs(), function ($attribute) {
+            return $attribute !== 'xmlns' && strpos($attribute, ':') === false;
+        }));
+        $values = [
+            '', '#local', '/relative', 'https://example.invalid/x',
+            'javascript:alert(1)', "java\tscript:alert(1)", 'data:text/html,x',
+            'url(#local)', 'url(https://example.invalid/x)',
+            '</style><img src=x onerror=alert(1)>', '<!--><script>alert(1)</script>',
+            'x;y', '0 0 10 10', 'normal-value',
+        ];
+
+        for ($run = 0; $run < 250; $run++) {
+            $tag = $tags[mt_rand(0, count($tags) - 1)];
+            $chosen = [];
+            $attributeText = '';
+            for ($i = mt_rand(0, 6); $i > 0; $i--) {
+                $attribute = $attributes[mt_rand(0, count($attributes) - 1)];
+                if (isset($chosen[$attribute])) {
+                    continue;
+                }
+                $chosen[$attribute] = true;
+                $attributeText .= ' ' . $attribute . '="' . htmlspecialchars($values[mt_rand(0, count($values) - 1)], ENT_QUOTES, 'UTF-8') . '"';
+            }
+            $text = htmlspecialchars($values[mt_rand(0, count($values) - 1)], ENT_NOQUOTES, 'UTF-8');
+            $input = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+                . '<' . $tag . $attributeText . '>' . $text . '</' . $tag . '></svg>';
+
+            foreach ([false, true] as $removeRemote) {
+                foreach ([false, true] as $minify) {
+                    $sanitizer = new Sanitizer();
+                    $sanitizer->removeXMLTag(true);
+                    $sanitizer->removeRemoteReferences($removeRemote);
+                    $sanitizer->minify($minify);
+
+                    $warnings = [];
+                    set_error_handler(function ($severity, $message) use (&$warnings) {
+                        $warnings[] = $message;
+
+                        return true;
+                    });
+                    try {
+                        $once = $sanitizer->sanitize($input);
+                        $twice = is_string($once) ? $sanitizer->sanitize($once) : $once;
+                    } finally {
+                        restore_error_handler();
+                    }
+
+                    $context = sprintf('run %d, remote %d, minify %d: %s', $run, $removeRemote, $minify, $input);
+                    self::assertSame([], $warnings, $context);
+                    self::assertTrue(is_string($once), $context);
+                    self::assertSame($once, $twice, 'sanitizing again must not change the output: ' . $context);
+                    self::assertSame([], self::unsafeOutputProblems($once), $context);
+                }
+            }
+        }
+    }
+
+    /**
+     * Script elements, event handlers, and script or HTML-document URLs in any
+     * attribute that is not known to be inert.
+     *
+     * @param string $svg
+     * @return string[]
+     */
+    private static function unsafeOutputProblems($svg)
+    {
+        $inert = ['alt', 'class', 'for', 'id', 'label', 'name', 'pattern', 'placeholder', 'role', 'summary', 'title', 'value', 'style', 'xmlns'];
+        $document = new \DOMDocument();
+        if (!$document->loadXML($svg)) {
+            return ['output is not well-formed XML'];
+        }
+
+        $problems = [];
+        foreach ((new \DOMXPath($document))->query('//*') as $element) {
+            if (strtolower($element->localName) === 'script') {
+                $problems[] = 'script element';
+            }
+            foreach ($element->attributes as $attribute) {
+                $name = strtolower($attribute->localName);
+                if (strpos($name, 'on') === 0) {
+                    $problems[] = 'event handler ' . $attribute->nodeName;
+                }
+                if (in_array($name, $inert, true) || strpos($name, 'data-') === 0 || strpos($name, 'aria-') === 0) {
+                    continue;
+                }
+                // Read it as the URL parser does: drop tabs and line breaks, and
+                // trim spaces and control characters from both ends.
+                $value = trim(str_replace(["\t", "\n", "\r"], '', $attribute->value), "\x00..\x20");
+                if (preg_match('~^(?:(?:java|vb)script:|data:(?!image/))~i', $value)) {
+                    $problems[] = 'unsafe URL in ' . $attribute->nodeName;
+                }
+            }
+        }
+
+        return $problems;
     }
 
     /**

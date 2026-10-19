@@ -10,7 +10,7 @@
   <a id="targetThree" href="#safe">
     <animateMotion values="XXX;javascript:alert(3)//" dur="0.1s" fill="freeze"></animateMotion>
     <animateColor values="XXX;javascript:alert(4)//" dur="0.1s" fill="freeze"></animateColor>
-    <animateTransform by="javascript:alert(5)//" dur="0.1s" fill="freeze"></animateTransform>
+    <animateTransform dur="0.1s" fill="freeze"></animateTransform>
   </a>
   <rect x="0" y="0" width="10" height="10">
     <animateTransform attributeName="transform" type="rotate" values="0;360" dur="2s" repeatCount="indefinite"></animateTransform>

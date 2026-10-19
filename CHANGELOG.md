@@ -16,9 +16,18 @@ The public API has not changed, but some input is now cleaned differently. See
 
 - Animation elements such as `<animateTransform>` can no longer change a link's
   `href` after sanitizing. Any `attributeName` that targets an `href` is removed.
-- A document whose DTD still reaches the XML parser is now rejected. That
+- A document whose DTD would still reach the XML parser is now rejected. That
   covers DTDs in encodings the pre-parse stripper cannot read, such as UTF-16,
-  and DOCTYPEs hidden inside other DOCTYPEs.
+  and DOCTYPEs hidden inside other DOCTYPEs. An internal DTD in UTF-16 or UTF-32
+  input is now rejected before parsing, so older libxml can no longer expand
+  its entities first, even with `setAllowHugeFiles(true)`.
+- Input that is unsafe to hand to the XML parser is rejected before parsing:
+  - an element with more than 4,096 attributes, which libxml before 2.10
+    parses in quadratic time
+  - encodings whose markup is not plain ASCII and cannot be checked first,
+    such as EBCDIC and UTF-7
+
+  The parser also now runs with `LIBXML_NONET`.
 - The `<use>` limits (`useThreshold()`, `setUseNestingLimit()` and loop
   detection) now measure the document a browser actually renders, both as XML
   and when the output is inlined in an HTML page. They are applied after tags
@@ -28,9 +37,12 @@ The public API has not changed, but some input is now cleaned differently. See
   case, namespaces, whitespace and percent-encoding. `useThreshold()` now
   counts every `<use>` a reference renders, at every level of a chain, not
   only the deepest ones.
-- `src` and `srcset` attributes can no longer hold `javascript:`, `vbscript:`
-  or non-image `data:` URLs, in every configuration. When the output is inlined
-  in HTML, an `<image>` inside `<title>` or `<desc>` becomes an HTML `<img>`.
+- Attributes that could hold a URL can no longer hold `javascript:`,
+  `vbscript:` or non-image `data:` URLs, in every configuration. When the output
+  is inlined in HTML, an `<image>` inside `<title>` or `<desc>` becomes an HTML
+  `<img>` that uses `src` and `srcset`. The check covers every attribute except
+  inert ones such as `title`, `class` and `id`, and `data-*` and `aria-*`, as
+  in DOMPurify.
 - `removeRemoteReferences(true)` now catches many more ways of writing a remote
   URL, in attributes and in `<style>`. These include CSS escapes, comments,
   line continuations and control characters inside URLs, backslashes in place
@@ -72,12 +84,21 @@ The public API has not changed, but some input is now cleaned differently. See
   - any `xlink:href` outside the XLink namespace
 - **Self-references.** An `href` on an element other than `<use>` no longer
   counts as a self-reference.
-- **`src` and `srcset`.** These are removed when they hold a `javascript:`,
-  `vbscript:` or non-image `data:` URL, in every configuration. Local paths,
-  `http(s)` URLs and `data:image/…` URLs stay.
+- **Unsafe URLs.** An attribute that starts with a `javascript:`, `vbscript:`
+  or non-image `data:` URL is removed, in every configuration. For `srcset`,
+  each candidate is checked. Local paths, `http(s)` URLs and `data:image/…`
+  URLs stay. Inert attributes (`alt`, `class`, `for`, `id`, `label`, `name`,
+  `pattern`, `placeholder`, `role`, `summary`, `title`, `value`, `style`,
+  `xmlns`), `data-*` and `aria-*` are not checked.
 - **Rejected documents.** `sanitize()` now returns `false` in these cases:
-  - a UTF-16 document, or another non-ASCII-compatible encoding, that carries
-    an internal DTD subset
+  - a UTF-16 or UTF-32 document that carries an internal DTD subset
+  - an element with more than 4,096 attributes
+  - an EBCDIC document, or one that declares an encoding not known to be
+    ASCII-compatible, such as UTF-7, or that declares UTF-16 while its bytes
+    are ASCII. UTF-8, UTF-16, UTF-32, ISO-8859-*, windows-125x and the common
+    Chinese, Japanese, Korean and Cyrillic encodings are still accepted.
+  - an `<svg>` root in a namespace other than SVG. A root with no namespace
+    is still accepted.
   - input that is empty once PHP tags or the `DOCTYPE` are removed
   - the string `'0'`, which used to return `''` as if it were empty input.
     Only `''` counts as empty input now.
@@ -92,6 +113,9 @@ The public API has not changed, but some input is now cleaned differently. See
   - `Document is empty`
   - `Internal DTD subset is not allowed`
   - `Nested DOCTYPE declaration`
+  - `Too many attributes on one element`
+  - `Unsupported document encoding`
+  - `Root element is not in the SVG namespace`
   - a message for a failed regular expression
 
   The CLI scanner therefore now reports a file whose only problem was remote
