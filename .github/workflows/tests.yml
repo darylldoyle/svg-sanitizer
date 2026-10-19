@@ -4,11 +4,15 @@ on: [push, pull_request]
 
 jobs:
   build:
+    name: PHP ${{ matrix.php }}, PCRE JIT ${{ matrix.jit == '1' && 'on' || 'off' }}
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
         php: ['7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5']
+        # Some regex paths are only slow, or only fail, with PCRE's JIT on or
+        # off, so run every PHP version both ways.
+        jit: ['0', '1']
       fail-fast: false
 
     steps:
@@ -19,6 +23,10 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: composer:v2
+          ini-values: pcre.jit=${{ matrix.jit }}
+
+      - name: Show PHP, libxml and PCRE JIT versions
+        run: php -r 'printf("PHP %s, libxml %s, pcre.jit=%s\n", PHP_VERSION, LIBXML_DOTTED_VERSION, ini_get("pcre.jit"));'
 
       - name: Validate composer.json
         run: composer validate
