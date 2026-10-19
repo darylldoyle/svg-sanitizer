@@ -1444,7 +1444,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
         self::assertTrue(self::largestUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
     }
@@ -1467,7 +1467,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
         self::assertTrue(false === stripos($cleanData, '<?php'), 'no PHP tag may survive');
         self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
@@ -1492,7 +1492,7 @@ class SanitizerTest extends TestCase
             return [$cleanData, microtime(true) - $started];
         });
 
-        self::assertTrue($result[1] < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $result[1]));
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
         self::assertTrue(false === $result[0] || false === stripos($result[0], '<?php'), 'no PHP tag may survive');
     }
 
@@ -1569,7 +1569,7 @@ class SanitizerTest extends TestCase
             return [$cleanData, microtime(true) - $started];
         });
 
-        self::assertTrue($result[1] < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $result[1]));
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
         self::assertTrue(is_string($result[0]));
     }
 
@@ -1678,7 +1678,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
         self::assertSame($count, substr_count($cleanData, '<use'), 'uses of a missing id expand to nothing and stay');
     }
@@ -1705,7 +1705,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
         self::assertSame($count, substr_count($cleanData, '<use'), 'uses of a plain rect stay');
     }
@@ -1730,7 +1730,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
         self::assertSame(0, substr_count($cleanData, '<use'), 'every self reference is removed');
         self::assertSame($count, substr_count($cleanData, '<text'), 'text survives');
@@ -1755,7 +1755,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
         self::assertSame($count, substr_count($cleanData, '<rect'), 'rects survive');
         self::assertSame(0, substr_count($cleanData, '<!--'), 'comments are removed');
@@ -2288,7 +2288,7 @@ class SanitizerTest extends TestCase
             return [$cleanData, microtime(true) - $started];
         });
 
-        self::assertTrue($result[1] < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $result[1]));
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
         self::assertTrue(is_string($result[0]));
     }
 
@@ -2311,7 +2311,7 @@ class SanitizerTest extends TestCase
             return [$cleanData, microtime(true) - $started];
         });
 
-        self::assertTrue($result[1] < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $result[1]));
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
         self::assertTrue(is_string($result[0]));
     }
 
@@ -2350,7 +2350,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertFalse($cleanData, 'more than 4,096 attributes on one element is rejected');
     }
 
@@ -2380,7 +2380,7 @@ class SanitizerTest extends TestCase
         $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
     }
 
     /**
@@ -2399,7 +2399,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
     }
 
@@ -2718,7 +2718,7 @@ class SanitizerTest extends TestCase
         $cleanData = $sanitizer->sanitize($svg);
         $elapsed = microtime(true) - $started;
 
-        self::assertTrue($elapsed < self::SLOW_INPUT_CEILING, sprintf('took %.2fs', $elapsed));
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
         self::assertTrue(is_string($cleanData));
     }
 
@@ -3247,6 +3247,56 @@ class SanitizerTest extends TestCase
         }
 
         return $problems;
+    }
+
+    /**
+     * Before PHP 8.1, DOMNode::removeChild() searches the parent's child list
+     * for the node, so removing many children of one parent was quadratic:
+     * 40,000 removals took over 10 seconds on PHP 8.0. This covers every kind
+     * of node the sanitizer removes or replaces.
+     *
+     * @test
+     */
+    public function manyRemovedNodesInOneParentAreRemovedQuickly()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g>'
+            . str_repeat('<rect width="1" height="1"/><!-- c --><![CDATA[x]]><x/>', 40000)
+            . '</g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(40000, substr_count($cleanData, '<rect'), 'rects survive');
+        self::assertSame(0, substr_count($cleanData, '<!--') + substr_count($cleanData, '<x') + substr_count($cleanData, 'CDATA'));
+    }
+
+    /**
+     * The time limit for the crafted slow inputs, scaled to the machine.
+     *
+     * Shared CI runners can be several times slower than a developer machine.
+     * The limit is the larger of SLOW_INPUT_CEILING and eight times a fixed,
+     * linear reference workload, so it follows the machine's speed while a
+     * quadratic regression, which grows far faster, still fails.
+     *
+     * @return float
+     */
+    private static function slowInputCeiling()
+    {
+        static $ceiling = null;
+        if ($ceiling === null) {
+            $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<g><rect width="1" height="1"/></g>', 20000) . '</svg>';
+            $sanitizer = new Sanitizer();
+            $sanitizer->sanitize($svg);
+            $started = microtime(true);
+            $sanitizer->sanitize($svg);
+            $ceiling = max(self::SLOW_INPUT_CEILING, 8 * (microtime(true) - $started));
+        }
+
+        return $ceiling;
     }
 
     /**
