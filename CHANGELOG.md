@@ -25,7 +25,12 @@ The public API has not changed, but some input is now cleaned differently. See
   and attributes are cleaned. They also now cover `<use>` elements that are
   nested inside other elements, that carry their own `id`, or that point at a
   duplicated `id`. They read references the way browsers do, including letter
-  case, namespaces, whitespace and percent-encoding.
+  case, namespaces, whitespace and percent-encoding. `useThreshold()` now
+  counts every `<use>` a reference renders, at every level of a chain, not
+  only the deepest ones.
+- `src` and `srcset` attributes can no longer hold `javascript:`, `vbscript:`
+  or non-image `data:` URLs, in every configuration. When the output is inlined
+  in HTML, an `<image>` inside `<title>` or `<desc>` becomes an HTML `<img>`.
 - `removeRemoteReferences(true)` now catches many more ways of writing a remote
   URL, in attributes and in `<style>`. These include CSS escapes, comments,
   line continuations and control characters inside URLs, backslashes in place
@@ -39,7 +44,9 @@ The public API has not changed, but some input is now cleaned differently. See
   - the remote-reference CSS checks
   - attribute cleaning
   - the `<use>` reference graph
-  - walking the document
+  - walking the document, which no longer holds a PHP object for every node at
+    once (costly before PHP 8.4)
+  - the list of issues, which is now capped
 - `sanitize()` no longer throws. Input it cannot process safely now returns
   `false`. That includes input that is empty once PHP tags or the `DOCTYPE` are
   removed, a root element that is not `<svg>`, and a failed regular expression.
@@ -48,10 +55,11 @@ The public API has not changed, but some input is now cleaned differently. See
 
 ### Changed
 
-- **`<use>` limits.** `<use>` elements inside plain groups now count toward
-  `useThreshold()`. Very large legitimate artwork, such as a halftone pattern
-  with more than 1,000 nested copies, can lose the `<use>` elements that
-  reference it. Raise the limit with `useThreshold()` if you need to.
+- **`<use>` limits.** `useThreshold()` now counts every `<use>` a reference
+  renders: those inside plain groups, and those at every level of a chain.
+  Very large legitimate artwork, such as a halftone pattern with more than
+  1,000 nested copies, can lose the `<use>` elements that reference it. Raise
+  the limit with `useThreshold()` if you need to.
 - **Duplicate ids.** When an `id` appears more than once and a `<use>`
   references it, the later elements lose their `id`. Browsers only ever
   resolve the first one. Duplicates that no `<use>` references keep their `id`,
@@ -64,10 +72,15 @@ The public API has not changed, but some input is now cleaned differently. See
   - any `xlink:href` outside the XLink namespace
 - **Self-references.** An `href` on an element other than `<use>` no longer
   counts as a self-reference.
+- **`src` and `srcset`.** These are removed when they hold a `javascript:`,
+  `vbscript:` or non-image `data:` URL, in every configuration. Local paths,
+  `http(s)` URLs and `data:image/…` URLs stay.
 - **Rejected documents.** `sanitize()` now returns `false` in these cases:
   - a UTF-16 document, or another non-ASCII-compatible encoding, that carries
     an internal DTD subset
   - input that is empty once PHP tags or the `DOCTYPE` are removed
+  - the string `'0'`, which used to return `''` as if it were empty input.
+    Only `''` counts as empty input now.
 - **`removeRemoteReferences(true)`.** This option now removes more:
   - every `srcset` attribute, because it is a list of URLs
   - any attribute holding a quoted remote URL, such as an `aria-label` that
@@ -83,6 +96,9 @@ The public API has not changed, but some input is now cleaned differently. See
 
   The CLI scanner therefore now reports a file whose only problem was remote
   CSS in a `<style>` element.
+- **Issue list.** `getXmlIssues()` lists at most 1,000 issues. When there are
+  more, its last entry says how many were left out. Every call to `sanitize()`
+  now starts with an empty list, including a call with empty input.
 
 ### Fixed
 

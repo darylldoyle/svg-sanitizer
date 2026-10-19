@@ -73,6 +73,19 @@ class Sanitizer
     protected $xmlIssues = array();
 
     /**
+     * Issues found after MAX_XML_ISSUES were recorded.
+     *
+     * @var int
+     */
+    protected $omittedXmlIssues = 0;
+
+    /**
+     * The most issues getXmlIssues() lists. Further issues are counted in one
+     * closing record instead.
+     */
+    const MAX_XML_ISSUES = 1000;
+
+    /**
      * @var Resolver
      */
     protected $elementReferenceResolver;
@@ -197,7 +210,38 @@ class Sanitizer
      * @return array
      */
     public function getXmlIssues() {
-        return $this->xmlIssues;
+        if ($this->omittedXmlIssues === 0) {
+            return $this->xmlIssues;
+        }
+
+        $issues = $this->xmlIssues;
+        $issues[] = array(
+            'message' => sprintf('%d more issues not listed', $this->omittedXmlIssues),
+            'line' => 0,
+        );
+
+        return $issues;
+    }
+
+    /**
+     * Record an issue, up to MAX_XML_ISSUES of them. Past that, issues are only
+     * counted: an input can hold hundreds of thousands of removable nodes, and
+     * keeping a record for each one could use more memory than the input itself.
+     *
+     * @param string $message
+     * @param int $line
+     */
+    protected function addXmlIssue($message, $line)
+    {
+        if (count($this->xmlIssues) < self::MAX_XML_ISSUES) {
+            $this->xmlIssues[] = array(
+                'message' => $message,
+                'line' => $line,
+            );
+            return;
+        }
+
+        $this->omittedXmlIssues++;
     }
 
     /**
@@ -227,8 +271,14 @@ class Sanitizer
      */
     public function sanitize($dirty)
     {
-        // Don't run on an empty string
-        if (empty($dirty)) {
+        // Every call starts with no issues, so getXmlIssues() never reports a
+        // previous document's issues.
+        $this->xmlIssues = array();
+        $this->omittedXmlIssues = 0;
+
+        // Don't run on an empty string. Compare strictly: empty() is also true
+        // for '0', which is not empty input but a document that fails to parse.
+        if ($dirty === '' || $dirty === null || $dirty === false) {
             return '';
         }
 
@@ -269,10 +319,7 @@ class Sanitizer
         try {
             $clean = $this->sanitizeDocument($dirty);
         } catch (\Throwable $e) {
-            $this->xmlIssues[] = array(
-                'message' => $e->getMessage(),
-                'line' => 0,
-            );
+            $this->addXmlIssue($e->getMessage(), 0);
             $clean = false;
         } finally {
             $this->resetAfter();
@@ -293,7 +340,9 @@ class Sanitizer
 
         // If we couldn't parse the XML then we go no further.
         if (!$loaded) {
-            $this->xmlIssues = self::getXmlErrors();
+            foreach (self::getXmlErrors() as $error) {
+                $this->addXmlIssue($error['message'], $error['line']);
+            }
             return false;
         }
 
@@ -308,10 +357,7 @@ class Sanitizer
             || $doctype->entities->length > 0
             || $doctype->notations->length > 0
         )) {
-            $this->xmlIssues[] = array(
-                'message' => 'Internal DTD subset is not allowed',
-                'line' => 0,
-            );
+            $this->addXmlIssue('Internal DTD subset is not allowed', 0);
             return false;
         }
 
@@ -365,12 +411,40 @@ class Sanitizer
      */
     protected function collapseWhitespace()
     {
-        $xPath = new \DOMXPath($this->xmlDocument);
-        foreach ($xPath->query('//text() | //@*') as $node) {
-            $value = $node->nodeValue;
-            $collapsed = $this->pregReplace('/\s+/', ' ', $value);
-            if ($collapsed !== $value) {
-                $node->nodeValue = $collapsed;
+        foreach ($this->walkNodes($this->xmlDocument) as $node) {
+            $values = $node instanceof \DOMElement ? iterator_to_array($node->attributes, false) : array($node);
+            foreach ($values as $valueNode) {
+                if (!$valueNode instanceof \DOMAttr && !$valueNode instanceof \DOMText) {
+                    continue;
+                }
+                $value = $valueNode->nodeValue;
+                $collapsed = $this->pregReplace('/\s+/', ' ', $value);
+                if ($collapsed !== $value) {
+                    $valueNode->nodeValue = $collapsed;
+                }
+            }
+        }
+    }
+
+    /**
+     * Every node under $node, in document order, one at a time.
+     *
+     * Before PHP 8.4, an XPath query or a node-list snapshot creates a PHP
+     * object for every matching node at once, at about half a kilobyte each.
+     * Following the sibling links instead keeps only the current path in memory.
+     * The next sibling is read before a node is yielded, so the caller may
+     * remove that node. The children of a removed node are skipped.
+     *
+     * @param \DOMNode $node
+     * @return \Generator|\DOMNode[]
+     */
+    protected function walkNodes(\DOMNode $node)
+    {
+        for ($child = $node->firstChild; $child !== null; $child = $next) {
+            $next = $child->nextSibling;
+            yield $child;
+            if ($child->parentNode !== null && $child->hasChildNodes()) {
+                yield from $this->walkNodes($child);
             }
         }
     }
@@ -560,16 +634,21 @@ class Sanitizer
      */
     protected function startClean(\DOMNodeList $elements, array $elementsToRemove)
     {
-        // Iterate over a static snapshot of the list. Calling item($i) on a
-        // live \DOMNodeList while stepping backwards re-walks the underlying
-        // linked list from the start on every call, which makes this loop
-        // O(n²) in the number of child nodes. The snapshot also guarantees
-        // we don't skip any sibling when we delete a node.
-        $currentElements = iterator_to_array($elements, false);
+        if ($elements->length === 0) {
+            return;
+        }
 
-        for ($i = count($currentElements) - 1; $i >= 0; $i--) {
-            /** @var \DOMElement $currentElement */
-            $currentElement = $currentElements[$i];
+        // Walk the children from the last one back through their sibling links.
+        // Calling item($i) on a live \DOMNodeList while stepping backwards
+        // re-walks the list from the start every time, which is O(n²). A
+        // snapshot of the whole list (iterator_to_array) avoids that, but holds
+        // a PHP object for every child at once, which before PHP 8.4 costs about
+        // half a kilobyte per node. Reading the previous sibling before handling
+        // a node also means removing that node never skips a sibling.
+        $parent = $elements->item(0)->parentNode;
+
+        for ($currentElement = $parent->lastChild; $currentElement !== null; $currentElement = $previousSibling) {
+            $previousSibling = $currentElement->previousSibling;
 
             /**
              * If the element has exceeded the nesting limit, we should remove it.
@@ -580,10 +659,7 @@ class Sanitizer
              */
             if ('use' === $currentElement->nodeName && in_array($currentElement, $elementsToRemove)) {
                 $currentElement->parentNode->removeChild($currentElement);
-                $this->xmlIssues[] = array(
-                    'message' => 'Invalid \'' . $currentElement->tagName . '\'',
-                    'line'    => $currentElement->getLineNo(),
-                );
+                $this->addXmlIssue('Invalid \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
                 continue;
             }
 
@@ -591,10 +667,7 @@ class Sanitizer
                 // If the tag isn't in the whitelist, remove it and continue with next iteration
                 if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
                     $currentElement->parentNode->removeChild($currentElement);
-                    $this->xmlIssues[] = array(
-                        'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
-                        'line' => $currentElement->getLineNo(),
-                    );
+                    $this->addXmlIssue('Suspicious tag \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
                     continue;
                 }
 
@@ -607,10 +680,7 @@ class Sanitizer
                         || $currentElement->namespaceURI !== $this->xmlDocument->documentElement->namespaceURI)
                 ) {
                     $currentElement->parentNode->removeChild($currentElement);
-                    $this->xmlIssues[] = array(
-                        'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
-                        'line' => $currentElement->getLineNo(),
-                    );
+                    $this->addXmlIssue('Suspicious tag \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
                     continue;
                 }
 
@@ -624,10 +694,7 @@ class Sanitizer
                     // Report the change, like every other removal, so callers
                     // (and the CLI scanner) can tell the input was not clean.
                     if ($strippedCss !== $css) {
-                        $this->xmlIssues[] = array(
-                            'message' => 'Remote reference removed from \'' . $currentElement->tagName . '\'',
-                            'line' => $currentElement->getLineNo(),
-                        );
+                        $this->addXmlIssue('Remote reference removed from \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
                     }
                 }
 
@@ -644,10 +711,7 @@ class Sanitizer
                         || ($this->elementReferenceResolver !== null && $this->isUseTagExceedingThreshold($currentElement))
                     ) {
                         $currentElement->parentNode->removeChild($currentElement);
-                        $this->xmlIssues[] = array(
-                            'message' => 'Suspicious \'' . $currentElement->tagName . '\'',
-                            'line' => $currentElement->getLineNo(),
-                        );
+                        $this->addXmlIssue('Suspicious \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
                         continue;
                     }
                 }
@@ -664,10 +728,7 @@ class Sanitizer
 
                     if ($breaksOutOfForeignContent) {
                         $currentElement->parentNode->removeChild($currentElement);
-                        $this->xmlIssues[] = array(
-                            'message' => 'Suspicious tag \'' . $currentElement->tagName . '\'',
-                            'line' => $currentElement->getLineNo(),
-                        );
+                        $this->addXmlIssue('Suspicious tag \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
                         continue;
                     }
                 }
@@ -696,15 +757,23 @@ class Sanitizer
     protected function removeDuplicateIds(XPath $xPath)
     {
         $referencedIds = array();
-        foreach ($xPath->query("//*[name()='use']") as $useElement) {
-            $useId = Helper::extractIdReferenceFromHref(Helper::getElementHref($useElement));
-            if ($useId !== null) {
-                $referencedIds[$useId] = true;
+        foreach ($this->walkNodes($this->xmlDocument) as $node) {
+            if ($node instanceof \DOMElement && $node->nodeName === 'use') {
+                $useId = Helper::extractIdReferenceFromHref(Helper::getElementHref($node));
+                if ($useId !== null) {
+                    $referencedIds[$useId] = true;
+                }
             }
+        }
+        if ($referencedIds === array()) {
+            return;
         }
 
         $seen = array();
-        foreach ($xPath->query('//*[@id]') as $element) {
+        foreach ($this->walkNodes($this->xmlDocument) as $element) {
+            if (!$element instanceof \DOMElement || !$element->hasAttribute('id')) {
+                continue;
+            }
             $id = $element->getAttribute('id');
             if (!isset($referencedIds[$id])) {
                 continue;
@@ -714,10 +783,7 @@ class Sanitizer
                 continue;
             }
             $element->removeAttribute('id');
-            $this->xmlIssues[] = array(
-                'message' => 'Duplicate id \'' . $id . '\'',
-                'line' => $element->getLineNo(),
-            );
+            $this->addXmlIssue('Duplicate id \'' . $id . '\'', $element->getLineNo());
         }
     }
 
@@ -730,15 +796,11 @@ class Sanitizer
      */
     protected function removeUnsafeUseElements(array $elementsToRemove)
     {
-        // An XPath result is a fixed list. Before PHP 8.3, walking the live list
-        // from getElementsByTagName() searched the document again for every
-        // element, which made this loop quadratic.
-        $xPath = new \DOMXPath($this->xmlDocument);
-        $useElements = iterator_to_array($xPath->query("//*[name()='use']"), false);
-
-        foreach ($useElements as $useElement) {
-            // Already gone along with an ancestor.
-            if ($useElement->parentNode === null) {
+        // walkNodes() visits one node at a time, and allows removing it. Walking
+        // getElementsByTagName() instead was quadratic before PHP 8.3, and an
+        // XPath query held every `<use>` in memory at once before PHP 8.4.
+        foreach ($this->walkNodes($this->xmlDocument) as $useElement) {
+            if (!$useElement instanceof \DOMElement || $useElement->nodeName !== 'use') {
                 continue;
             }
 
@@ -751,19 +813,13 @@ class Sanitizer
              */
             if (in_array($useElement, $elementsToRemove)) {
                 $useElement->parentNode->removeChild($useElement);
-                $this->xmlIssues[] = array(
-                    'message' => 'Invalid \'' . $useElement->tagName . '\'',
-                    'line'    => $useElement->getLineNo(),
-                );
+                $this->addXmlIssue('Invalid \'' . $useElement->tagName . '\'', $useElement->getLineNo());
                 continue;
             }
 
             if ($this->isUseTagExceedingThreshold($useElement)) {
                 $useElement->parentNode->removeChild($useElement);
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious \'' . $useElement->tagName . '\'',
-                    'line' => $useElement->getLineNo(),
-                );
+                $this->addXmlIssue('Suspicious \'' . $useElement->tagName . '\'', $useElement->getLineNo());
             }
         }
     }
@@ -790,10 +846,7 @@ class Sanitizer
             if (!in_array(strtolower($attrName), $this->allowedAttrs) && !$this->isAriaAttribute(strtolower($attrName)) && !$this->isDataAttribute(strtolower($attrName))) {
 
                 $element->removeAttributeNode($attribute);
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
-                    'line' => $element->getLineNo(),
-                );
+                $this->addXmlIssue('Suspicious attribute \'' . $attrName . '\'', $element->getLineNo());
 
                 // Once removed, skip the remaining checks for this attribute so the
                 // same node is never removed twice.
@@ -805,10 +858,17 @@ class Sanitizer
             // limits never measured it.
             if (strtolower($attrName) === 'id' && $attrName !== 'id') {
                 $element->removeAttributeNode($attribute);
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
-                    'line' => $element->getLineNo(),
-                );
+                $this->addXmlIssue('Suspicious attribute \'' . $attrName . '\'', $element->getLineNo());
+                continue;
+            }
+
+            // `src` and `srcset` hold URLs. When the output is inlined in HTML, an
+            // `<image>` inside `<title>` or `<desc>` becomes an `<img>`, so remove
+            // script and document URLs from them, in every configuration.
+            $lowerAttrName = strtolower($attrName);
+            if (($lowerAttrName === 'src' || $lowerAttrName === 'srcset') && $this->hasUnsafeUrlScheme($attribute->value)) {
+                $element->removeAttributeNode($attribute);
+                $this->addXmlIssue('Suspicious attribute \'' . $attrName . '\'', $element->getLineNo());
                 continue;
             }
 
@@ -827,10 +887,7 @@ class Sanitizer
                 && false !== stripos($attribute->value, 'href')
             ) {
                 $element->removeAttributeNode($attribute);
-                $this->xmlIssues[] = array(
-                    'message' => 'Suspicious attribute \'' . $attrName . '\'',
-                    'line'    => $element->getLineNo(),
-                );
+                $this->addXmlIssue('Suspicious attribute \'' . $attrName . '\'', $element->getLineNo());
 
                 continue;
             }
@@ -844,10 +901,7 @@ class Sanitizer
                 $href = $attribute->value;
                 if (false === $this->isHrefSafeValue($href)) {
                     $element->removeAttributeNode($attribute);
-                    $this->xmlIssues[] = array(
-                        'message' => 'Suspicious attribute \'href\'',
-                        'line'    => $element->getLineNo(),
-                    );
+                    $this->addXmlIssue('Suspicious attribute \'href\'', $element->getLineNo());
                     continue;
                 }
             }
@@ -880,10 +934,7 @@ class Sanitizer
                 // Remove attribute if it has a remote reference
                 if ($isRemote) {
                     $element->removeAttributeNode($attribute);
-                    $this->xmlIssues[] = array(
-                        'message' => 'Suspicious attribute \'' . $attrName . '\'',
-                        'line' => $element->getLineNo(),
-                    );
+                    $this->addXmlIssue('Suspicious attribute \'' . $attrName . '\'', $element->getLineNo());
                 }
             }
         }
@@ -906,10 +957,7 @@ class Sanitizer
             // output is inlined in a page.
             if (strtolower($attribute->nodeName) === 'xlink:href' && $attribute->namespaceURI !== Helper::XLINK_NAMESPACE_URI) {
                 $element->removeAttributeNode($attribute);
-                $this->xmlIssues[] = array(
-                    'message' => sprintf('Unexpected attribute \'%s\'', $attribute->nodeName),
-                    'line' => $element->getLineNo(),
-                );
+                $this->addXmlIssue(sprintf('Unexpected attribute \'%s\'', $attribute->nodeName), $element->getLineNo());
             }
         }
         $this->cleanHrefAttributes($element, 'xlink');
@@ -936,10 +984,7 @@ class Sanitizer
         foreach ($relevantAttributes as $attribute) {
             if (!$this->isHrefSafeValue($attribute->value)) {
                 $element->removeAttributeNode($attribute);
-                $this->xmlIssues[] = array(
-                    'message' => sprintf('Suspicious attribute \'%s\'', $attribute->nodeName),
-                    'line' => $element->getLineNo(),
-                );
+                $this->addXmlIssue(sprintf('Suspicious attribute \'%s\'', $attribute->nodeName), $element->getLineNo());
                 continue;
             }
             // in case the attribute name is `HrEf`/`xlink:HrEf`, adjust it to `href`/`xlink:href`
@@ -1024,6 +1069,23 @@ class Sanitizer
         }
 
         return false;
+    }
+
+    /**
+     * Does a URL, or any candidate in a `srcset` list, use a script scheme
+     * (`javascript:`, `vbscript:`) or a `data:` URL that is not an image?
+     *
+     * The URL parser drops tabs and line breaks anywhere in a URL and trims
+     * control characters, so they are removed before matching.
+     *
+     * @param string $value
+     * @return bool
+     */
+    protected function hasUnsafeUrlScheme($value)
+    {
+        $value = $this->pregReplace('/[\x00-\x1F\x7F]/', '', $value);
+
+        return $this->pregMatch('~(?:^|,)\s*+(?:(?:java|vb)script:|data:(?!image/))~i', $value);
     }
 
     /**
@@ -1548,7 +1610,9 @@ class Sanitizer
             return false;
         }
         foreach ($this->elementReferenceResolver->findByElementId($useId) as $subject) {
-            if ($subject->countUse() >= $this->useThreshold) {
+            // Count every `<use>` the target renders, at every level, not only
+            // the deepest ones.
+            if ($subject->countRenderedUse() >= $this->useThreshold) {
                 return true;
             }
         }
@@ -1578,10 +1642,7 @@ class Sanitizer
         // If the element doesn't have a tagname, remove it and continue with next iteration
         } elseif (!$currentElement instanceof \DOMElement && !$currentElement instanceof \DOMText) {
             $currentElement->parentNode->removeChild($currentElement);
-            $this->xmlIssues[] = array(
-                'message' => 'Suspicious node \'' . $currentElement->nodeName . '\'',
-                'line' => $currentElement->getLineNo(),
-            );
+            $this->addXmlIssue('Suspicious node \'' . $currentElement->nodeName . '\'', $currentElement->getLineNo());
             return;
         }
 

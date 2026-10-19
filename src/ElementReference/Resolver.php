@@ -84,15 +84,33 @@ class Resolver
      */
     protected function collectIdentifiedElements()
     {
-        /** @var \DOMNodeList|\DOMElement[] $elements */
-        $elements = $this->xPath->query('//*[@id]');
-        foreach ($elements as $element) {
-            $id = $element->getAttribute('id');
-            // Browsers resolve `#id` to the first element with that id. Keeping a
-            // later duplicate instead would let an empty decoy stand in for the
-            // element that is actually rendered.
-            if (!isset($this->subjects[$id])) {
-                $this->subjects[$id] = new Subject($element, $this->useNestingLimit);
+        $this->collectIdentifiedElementsUnder($this->xPath->document);
+    }
+
+    /**
+     * Visit the elements under $node in document order through their sibling
+     * links. Before PHP 8.4, an XPath query such as `//*[@id]` creates a PHP
+     * object for every match at once, at about half a kilobyte each.
+     *
+     * @param \DOMNode $node
+     */
+    protected function collectIdentifiedElementsUnder(\DOMNode $node)
+    {
+        for ($element = $node->firstChild; $element !== null; $element = $element->nextSibling) {
+            if (!$element instanceof \DOMElement) {
+                continue;
+            }
+            if ($element->hasAttribute('id')) {
+                $id = $element->getAttribute('id');
+                // Browsers resolve `#id` to the first element with that id. Keeping a
+                // later duplicate instead would let an empty decoy stand in for the
+                // element that is actually rendered.
+                if (!isset($this->subjects[$id])) {
+                    $this->subjects[$id] = new Subject($element, $this->useNestingLimit);
+                }
+            }
+            if ($element->hasChildNodes()) {
+                $this->collectIdentifiedElementsUnder($element);
             }
         }
     }
@@ -115,16 +133,13 @@ class Resolver
         // each `<use>` is attached to its nearest identified ancestor only, and
         // each identified element records the identified elements nested
         // directly inside it (see Subject::addContained()).
-        $useElements = new \SplObjectStorage();
-        foreach ($this->xPath->query('//' . $this->xPath->createNodeName('use')) as $useElement) {
-            // Array syntax: attach() and contains() are deprecated in PHP 8.5.
-            $useElements[$useElement] = true;
-        }
-
         $documentElement = $this->xPath->document->documentElement;
         if ($documentElement !== null) {
             $ancestorIds = [];
-            $this->walkReferences($documentElement, null, $ancestorIds, $useElements);
+            // A `<use>` counts when it is in the root's namespace, which is what
+            // the `svg:use` XPath name matches. Checking that during the walk,
+            // instead of collecting every `<use>` up front, keeps memory flat.
+            $this->walkReferences($documentElement, null, $ancestorIds, (string) $documentElement->namespaceURI);
         }
     }
 
@@ -135,9 +150,9 @@ class Resolver
      * @param \DOMElement $element
      * @param Subject|null $nearest Nearest identified ancestor
      * @param array<string, bool> $ancestorIds Ids of all ancestors
-     * @param \SplObjectStorage $useElements
+     * @param string $useNamespace The namespace a `<use>` must be in
      */
-    protected function walkReferences(\DOMElement $element, $nearest, array &$ancestorIds, \SplObjectStorage $useElements)
+    protected function walkReferences(\DOMElement $element, $nearest, array &$ancestorIds, $useNamespace)
     {
         $id = null;
         if ($element->hasAttribute('id')) {
@@ -159,13 +174,13 @@ class Resolver
         // rendering `<use id="u" href="#x">` renders `#x`, so anything that uses
         // `#u` renders `#x` too. Its own id is in $ancestorIds by now, so
         // `<use id="a" href="#a">` counts as a self reference.
-        if (isset($useElements[$element])) {
+        if ($element->localName === 'use' && (string) $element->namespaceURI === $useNamespace) {
             $this->addReference($element, $nearest, $ancestorIds);
         }
 
         foreach ($element->childNodes as $child) {
             if ($child instanceof \DOMElement) {
-                $this->walkReferences($child, $nearest, $ancestorIds, $useElements);
+                $this->walkReferences($child, $nearest, $ancestorIds, $useNamespace);
             }
         }
 

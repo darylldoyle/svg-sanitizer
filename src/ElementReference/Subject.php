@@ -62,6 +62,18 @@ class Subject
     protected $countingUse = false;
 
     /**
+     * Result of countRenderedUse(), once known.
+     *
+     * @var int|null
+     */
+    protected $renderedUseCount;
+
+    /**
+     * @var bool
+     */
+    protected $countingRenderedUse = false;
+
+    /**
      * Subject constructor.
      *
      * @param \DOMElement $element
@@ -216,6 +228,54 @@ class Subject
      * @param bool $accumulated
      * @return int
      */
+    /**
+     * How many `<use>` instances rendering this subject produces, counting every
+     * level of every chain: each `<use>` itself plus everything its target
+     * renders, and everything inside contained subjects.
+     *
+     * countUse() counts only the deepest instances, so a chain with one `<use>`
+     * per level counts as 1 however long it is. This is the count the
+     * expansion threshold needs.
+     *
+     * @return int
+     */
+    public function countRenderedUse()
+    {
+        if ($this->renderedUseCount !== null) {
+            return $this->renderedUseCount;
+        }
+
+        // Reached again while still counting: a reference loop. Loops are found
+        // and removed by hasInfiniteLoop(), so count nothing rather than recurse
+        // forever.
+        if ($this->countingRenderedUse) {
+            return 0;
+        }
+
+        $this->countingRenderedUse = true;
+        $count = 0;
+        foreach ($this->useCollection as $use) {
+            $count += $use->getCount() * (1 + $use->getSubject()->countRenderedUse());
+            // Stop at the largest integer instead of overflowing into a float.
+            if (!is_int($count)) {
+                $count = PHP_INT_MAX;
+                break;
+            }
+        }
+        foreach ($this->containedSubjects as $containedSubject) {
+            if ($count === PHP_INT_MAX) {
+                break;
+            }
+            $count += $containedSubject->countRenderedUse();
+            if (!is_int($count)) {
+                $count = PHP_INT_MAX;
+            }
+        }
+        $this->countingRenderedUse = false;
+
+        return $this->renderedUseCount = $count;
+    }
+
     public function countUse($accumulated = false)
     {
         $key = $accumulated ? 1 : 0;
@@ -295,5 +355,6 @@ class Subject
     {
         $this->loopFreeDepth = null;
         $this->useCounts = [];
+        $this->renderedUseCount = null;
     }
 }

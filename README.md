@@ -48,7 +48,7 @@ This defaults to false, set to true to remove references.
 
 `$sanitizer->removeRemoteReferences(true);`
 
-When enabled, remote references are also stripped from CSS inside `<style>` elements and `style` attributes (`url()`, `@import`, and `image-set()`). This CSS handling is best-effort: it is not a full CSS parser, so some obscure forms (such as the bare-string forms of `image()`/`src()`) are not covered. Treat it as defence-in-depth rather than a guarantee, and isolate untrusted CSS at the point where the SVG is embedded.
+When enabled, remote references are also stripped from CSS inside `<style>` elements and from CSS in attributes (`url()`, `@import`, `image-set()`, and quoted strings that start with a remote URL). `srcset` attributes are removed entirely, because they hold a list of URLs. This CSS handling is best-effort: it is not a full CSS parser. Treat it as defence-in-depth rather than a guarantee, and isolate untrusted CSS at the point where the SVG is embedded.
 
 Note: if a `<style>` element or `style` attribute contains a remote reference that gets stripped, any CSS escape sequences in that same block are normalised (decoded) in the output. This is semantically identical CSS but will rewrite escapes an author wrote by hand.
 
@@ -59,6 +59,8 @@ You may use the `getXmlIssues()` method to return an array of issues that occurr
 This may be useful for logging or providing feedback to the user on why an SVG was refused.
 
 `$issues = $sanitizer->getXmlIssues();`
+
+The list holds up to 1,000 issues. If there are more, the last entry says how many were left out.
 
 ## Minification
 

@@ -2798,6 +2798,143 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * Every removed element used to add a record to getXmlIssues(), with no
+     * limit. 200,000 disallowed elements in under 1 MB used over 100 MB.
+     *
+     * @test
+     */
+    public function issueRecordsStayWithinTheMemoryBudget()
+    {
+        if (!function_exists('memory_reset_peak_usage')) {
+            self::markTestSkipped('Measuring the peak memory of one call needs PHP 8.2 or later.');
+        }
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<x/>', 200000) . '</svg>';
+
+        memory_reset_peak_usage();
+        $before = memory_get_usage();
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+        $used = memory_get_peak_usage() - $before;
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(0, substr_count($cleanData, '<x'), 'every disallowed element is still removed');
+        self::assertTrue($used < 64 * 1024 * 1024, sprintf('used %d MB', $used >> 20));
+    }
+
+    /**
+     * Past the limit, further issues are counted in one closing record instead
+     * of being listed.
+     *
+     * @test
+     */
+    public function issueRecordsAreCappedWithASummary()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<x/>', 1500) . '</svg>');
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertSame(1001, count($issues));
+        self::assertSame("Suspicious tag 'x'", $issues[0]['message']);
+        self::assertTrue(false !== strpos($issues[1000]['message'], '500 more issues'), 'the last record counts the issues left out');
+    }
+
+    /**
+     * `useThreshold()` must count every `<use>` a reference renders, not only the
+     * deepest ones. A chain with one `<use>` per level counted as 1 however
+     * long it was, so 999 uses of a 13-step chain rendered about 14,000 copies
+     * under a threshold of 1,000.
+     *
+     * @test
+     */
+    public function thresholdCountsEveryRenderedUse()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="n0"><rect/></g>';
+        for ($i = 1; $i <= 13; $i++) {
+            $svg .= '<g id="n' . $i . '"><use href="#n' . ($i - 1) . '"/></g>';
+        }
+        $svg .= '<g id="n14">' . str_repeat('<use href="#n13"/>', 999) . '</g><use href="#n14"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 1000, 'every rendered <use> must count toward the threshold');
+    }
+
+    /**
+     * `src` and `srcset` hold URLs. When the output is inlined in HTML, an
+     * `<image>` inside `<title>` or `<desc>` becomes an `<img>`, so script and
+     * document URLs must not survive there, in the default configuration too.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function unsafeSourceDataProvider()
+    {
+        return [
+            'javascript: in src' => ['src="javascript:alert(1)"'],
+            'javascript: with a tab in src' => ['src="java&#9;script:alert(1)"'],
+            'vbscript: in src' => ['src="VBScript:msgbox(1)"'],
+            'HTML data: URL in src' => ['src="data:text/html,x"'],
+            'javascript: in a later srcset candidate' => ['srcset="/a.png 1x, javascript:alert(1) 2x"'],
+            'HTML data: URL in srcset' => ['srcset="data:text/html,x 1x"'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider unsafeSourceDataProvider
+     */
+    public function unsafeUrlSchemesAreRemovedFromSrcAndSrcset($attribute)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><title><image ' . $attribute . '/></title></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === stripos($cleanData, 'script:'), 'a script URL should be removed');
+        self::assertTrue(false === stripos($cleanData, 'data:text/html'), 'an HTML data: URL should be removed');
+    }
+
+    /**
+     * Regression guard: ordinary `src` and `srcset` values stay in the default
+     * configuration.
+     *
+     * @test
+     */
+    public function safeSrcAndSrcsetValuesAreKept()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><title>'
+            . '<image src="/images/a.png" srcset="a.png 1x, https://example.com/b.png 2x"/>'
+            . '<image src="data:image/png;base64,iVBORw0KGgo="/></title></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(false !== strpos($cleanData, 'src="/images/a.png"'), 'a local src should stay');
+        self::assertTrue(false !== strpos($cleanData, 'srcset="a.png 1x, https://example.com/b.png 2x"'), 'an ordinary srcset should stay');
+        self::assertTrue(false !== strpos($cleanData, 'src="data:image/png;base64,iVBORw0KGgo="'), 'an image data: URL should stay');
+    }
+
+    /**
+     * `sanitize('0')` is not empty input: it is a document that fails to parse.
+     * And `sanitize('')` must not leave the previous call's issues behind.
+     *
+     * @test
+     */
+    public function emptyInputIsOnlyTheEmptyStringAndClearsIssues()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>');
+        self::assertTrue(count($sanitizer->getXmlIssues()) > 0);
+
+        self::assertSame('', $sanitizer->sanitize(''));
+        self::assertSame([], $sanitizer->getXmlIssues());
+        self::assertFalse($sanitizer->sanitize('0'));
+    }
+
+    /**
      * Encode an ASCII string as UTF-16.
      *
      * @param string $ascii
