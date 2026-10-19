@@ -34,11 +34,22 @@ $cleanSVG = $sanitizer->sanitize($dirtySVG);
 
 This will either return a sanitized SVG/XML string or boolean `false` if XML parsing failed (usually due to a badly formatted file).
 
+It also returns `false` for input it will not hand to the XML parser:
+
+- an element with more than 4,096 attributes
+- an internal DTD in UTF-16 or UTF-32 input
+- an encoding whose markup is not plain ASCII, such as EBCDIC or UTF-7
+- an `<svg>` root in a namespace other than SVG
+
+`getXmlIssues()` says why.
+
 ## Options
 
 You may pass your own whitelist of tags and attributes by using the `Sanitizer::setAllowedTags` and `Sanitizer::setAllowedAttrs` methods respectively.
 
 These methods require that you implement the `enshrined\svgSanitize\data\TagInterface` or `enshrined\svgSanitize\data\AttributeInterface`.
+
+`<use>` is allowed by default, behind limits on how far references can expand (`useThreshold()`) and nest (`setUseNestingLimit()`). If you don't need it, for example because you inline untrusted SVG into your pages, leave `use` out of your tag allowlist to remove that whole area.
 
 ## Remove remote references
 
@@ -48,7 +59,7 @@ This defaults to false, set to true to remove references.
 
 `$sanitizer->removeRemoteReferences(true);`
 
-When enabled, remote references are also stripped from CSS inside `<style>` elements and `style` attributes (`url()`, `@import`, and `image-set()`). This CSS handling is best-effort: it is not a full CSS parser, so some obscure forms (such as the bare-string forms of `image()`/`src()`) are not covered. Treat it as defence-in-depth rather than a guarantee, and isolate untrusted CSS at the point where the SVG is embedded.
+When enabled, remote references are also stripped from CSS inside `<style>` elements and from CSS in attributes (`url()`, `@import`, `image-set()`, and quoted strings that start with a remote URL). `srcset` attributes are removed entirely, because they hold a list of URLs. This CSS handling is best-effort: it is not a full CSS parser. Treat it as defence-in-depth rather than a guarantee, and isolate untrusted CSS at the point where the SVG is embedded.
 
 Note: if a `<style>` element or `style` attribute contains a remote reference that gets stripped, any CSS escape sequences in that same block are normalised (decoded) in the output. This is semantically identical CSS but will rewrite escapes an author wrote by hand.
 
@@ -59,6 +70,8 @@ You may use the `getXmlIssues()` method to return an array of issues that occurr
 This may be useful for logging or providing feedback to the user on why an SVG was refused.
 
 `$issues = $sanitizer->getXmlIssues();`
+
+The list holds up to 1,000 issues. If there are more, the last entry says how many were left out.
 
 ## Minification
 

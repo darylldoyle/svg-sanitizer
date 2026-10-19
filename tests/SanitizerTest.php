@@ -663,6 +663,70 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * SMIL animation elements can retarget an already-validated `href` at runtime.
+     * Safari only requires the animation target to be animatable rather than
+     * transform-specific, so `<animateTransform attributeName="href">` can turn a
+     * safe link into a `javascript:` URI via `values`/`by`. Any animation whose
+     * target is href-like must lose its `attributeName`, while ordinary animations
+     * are left alone.
+     *
+     * @test
+     */
+    public function animatedHrefIsSanitized()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/animatedHrefTest.svg');
+        $expected = file_get_contents($dataDirectory . '/animatedHrefClean.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * The animated-href check must not fire on a legitimate animation, and must
+     * still fire when the target is obfuscated by case or padding.
+     *
+     * @test
+     */
+    public function animatedHrefTargetsAreMatchedLoosely()
+    {
+        $cases = array(
+            'href'        => false,
+            'xlink:href'  => false,
+            'HrEf'        => false,
+            ' href '      => false,
+            'XLINK:HREF'  => false,
+            'transform'   => true,
+            'opacity'     => true,
+            'fill'        => true,
+        );
+
+        foreach ($cases as $target => $shouldSurvive) {
+            $initialData = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+                . '<a href="#safe"><animateTransform attributeName="' . $target . '" type="invalid"'
+                . ' values="XXX;javascript:alert(1)//" dur="0.1s" fill="freeze"/></a></svg>';
+
+            $sanitizer = new Sanitizer();
+            $cleanData = $sanitizer->sanitize($initialData);
+
+            if ($shouldSurvive) {
+                self::assertTrue(
+                    false !== strpos($cleanData, 'attributeName="' . $target . '"'),
+                    sprintf('legitimate animation of \'%s\' must be preserved', $target)
+                );
+            } else {
+                self::assertTrue(
+                    false === strpos($cleanData, 'attributeName'),
+                    sprintf('animation targeting \'%s\' must lose its attributeName', $target)
+                );
+            }
+        }
+    }
+
+    /**
      * When `href` and `xlink:href` coexist on the same element, both must be
      * processed by the href cleaning pass: iterating the attribute map by key
      * collapses them onto the same `href` key, hiding one of the two.
@@ -1110,5 +1174,2406 @@ class SanitizerTest extends TestCase
         self::assertSame($count, substr_count($cleanData, '<rect'));
         self::assertSame(0, substr_count($cleanData, '<script'));
         self::assertCount($count, $sanitizer->getXmlIssues());
+    }
+
+    /**
+     * Upper bound, in seconds, for the crafted inputs below that used to take
+     * several seconds or more. The fixed code handles each of them in a few
+     * milliseconds, so this leaves a wide margin for slow CI runners while still
+     * failing loudly if the slow behaviour comes back.
+     */
+    const SLOW_INPUT_CEILING = 2.0;
+
+    /**
+     * Byte orders and BOM combinations libxml auto-detects as UTF-16.
+     *
+     * @return array<string, array{0: bool, 1: bool}>
+     */
+    public static function utf16EncodingDataProvider()
+    {
+        return [
+            'UTF-16LE with BOM' => [false, true],
+            'UTF-16BE with BOM' => [true, true],
+            'UTF-16LE without BOM' => [false, false],
+            'UTF-16BE without BOM' => [true, false],
+        ];
+    }
+
+    /**
+     * The DTD is stripped from the raw bytes before parsing. In UTF-16 every
+     * character is followed or preceded by a NUL byte, so a byte search for
+     * `<!DOCTYPE` never matches, while libxml still decodes the document and
+     * defines the custom entity. The entity-collision payload must be rejected
+     * whatever the input encoding.
+     *
+     * @test
+     * @dataProvider utf16EncodingDataProvider
+     */
+    public function utf16EncodedEntityHrefBypassIsRejected($bigEndian, $withBom)
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = self::toUtf16(
+            str_replace('encoding="UTF-8"', 'encoding="UTF-16"', file_get_contents($dataDirectory . '/entityHrefBypassTest.svg')),
+            $bigEndian,
+            $withBom
+        );
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertFalse($cleanData);
+    }
+
+    /**
+     * A UTF-16 DTD can also give `<use>` a default `href`, so the reference graph
+     * sees `#ok` while the browser follows the real, non-fragment reference.
+     *
+     * @test
+     */
+    public function utf16EncodedAttlistDefaultIsRejected()
+    {
+        $svg = '<?xml version="1.0" encoding="UTF-16"?>'
+            . '<!DOCTYPE svg [<!ATTLIST use href CDATA "#ok">]>'
+            . '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<use xlink:href="/evil.svg"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(self::toUtf16($svg, false, true));
+
+        self::assertFalse($cleanData);
+    }
+
+    /**
+     * Removing one DOCTYPE can join the text around it into a new, complete one.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function splicedDoctypeDataProvider()
+    {
+        $body = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<a xlink:href="&Tab;javascript:alert(1)"><text>x</text></a></svg>';
+
+        return [
+            'split after <!' => ['<!<!DOCTYPE x>DOCTYPE svg [<!ENTITY Tab "#">]>' . $body],
+            'split inside the keyword' => ['<!DOC<!DOCTYPE x>TYPE svg [<!ENTITY Tab "#">]>' . $body],
+            'nested twice' => ['<!DOC<!DOC<!DOCTYPE x>TYPE y>TYPE svg [<!ENTITY Tab "#">]>' . $body],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider splicedDoctypeDataProvider
+     */
+    public function splicedDoctypeIsRejected($svg)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertFalse($cleanData);
+    }
+
+    /**
+     * Regression guard: a UTF-16 document without a DTD must keep sanitizing.
+     *
+     * @test
+     * @dataProvider utf16EncodingDataProvider
+     */
+    public function utf16DocumentWithoutDtdStillSanitizes($bigEndian, $withBom)
+    {
+        $svg = '<?xml version="1.0" encoding="UTF-16"?>'
+            . '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(self::toUtf16($svg, $bigEndian, $withBom));
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Regression guard: a UTF-16 document with an entity-free PUBLIC DOCTYPE (no
+     * internal subset) must keep sanitizing, like its UTF-8 equivalent.
+     *
+     * @test
+     */
+    public function utf16DocumentWithPublicDoctypeStillSanitizes()
+    {
+        $svg = '<?xml version="1.0" encoding="UTF-16"?>'
+            . '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">'
+            . '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(self::toUtf16($svg, false, true));
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Well-formed XML whose root is not a single `<svg>` must give the documented
+     * `false`, not an uncaught exception.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function nonSvgRootDataProvider()
+    {
+        return [
+            'other root element' => ['<?xml version="1.0"?><root><child/></root>'],
+            'svg nested under another root' => ['<html><body><svg xmlns="http://www.w3.org/2000/svg"></svg></body></html>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider nonSvgRootDataProvider
+     */
+    public function nonSvgRootReturnsFalse($xml)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($xml);
+
+        self::assertFalse($cleanData);
+        self::assertTrue(count($sanitizer->getXmlIssues()) > 0, 'the reason should be reported');
+    }
+
+    /**
+     * A `<use>` inside the element it references is an infinite loop. It must be
+     * removed, not crash the sanitizer, however deeply it is nested.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function useReferencingItsOwnAncestorDataProvider()
+    {
+        $open = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">';
+
+        return [
+            'direct child, href' => [
+                $open . '<g id="a"><use href="#a"/></g></svg>',
+                $open . '<g id="a"></g></svg>',
+            ],
+            'direct child, xlink:href' => [
+                $open . '<g id="a"><use xlink:href="#a"/></g></svg>',
+                $open . '<g id="a"></g></svg>',
+            ],
+            'child of the root svg' => [
+                '<svg xmlns="http://www.w3.org/2000/svg" id="a"><use href="#a"/></svg>',
+                '<svg xmlns="http://www.w3.org/2000/svg" id="a"></svg>',
+            ],
+            'wrapped in a plain group' => [
+                $open . '<g id="a"><g><use href="#a"/></g></g></svg>',
+                $open . '<g id="a"><g></g></g></svg>',
+            ],
+            'inside a nested identified group' => [
+                $open . '<g id="a"><g id="b"><use href="#a"/></g></g></svg>',
+                $open . '<g id="a"><g id="b"></g></g></svg>',
+            ],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider useReferencingItsOwnAncestorDataProvider
+     */
+    public function useReferencingItsOwnAncestorIsRemoved($svg, $expected)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Wrapping each level's `<use>` elements in a plain `<g>` used to hide them
+     * from the reference graph, so the billion-laughs fixture passed the
+     * expansion threshold untouched. Wrapped, it must be cleaned exactly like
+     * the unwrapped original.
+     *
+     * @test
+     */
+    public function useElementsInsidePlainGroupsCountTowardsTheThreshold()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = self::wrapIdentifiedGroupContents(file_get_contents($dataDirectory . '/xlinkLaughsTest.svg'));
+        $expected = self::wrapIdentifiedGroupContents(file_get_contents($dataDirectory . '/xlinkLaughsClean.svg'));
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Layered, loop-free `<use>` graphs whose depth stays within the nesting
+     * limit: every element in one layer uses every element in the next, so the
+     * number of distinct paths grows as fan-out ^ depth.
+     *
+     * @return array<string, array{0: int, 1: int}>
+     */
+    public static function layeredUseGraphDataProvider()
+    {
+        return [
+            '12 layers of 4' => [12, 4],
+            '15 layers of 3, at the nesting limit' => [15, 3],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider layeredUseGraphDataProvider
+     */
+    public function layeredUseGraphIsAnalysedQuickly($layers, $fanOut)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($layer = 0; $layer < $layers; $layer++) {
+            for ($node = 0; $node < $fanOut; $node++) {
+                $svg .= '<g id="n_' . $layer . '_' . $node . '">';
+                if ($layer < $layers - 1) {
+                    for ($next = 0; $next < $fanOut; $next++) {
+                        $svg .= '<use href="#n_' . ($layer + 1) . '_' . $next . '"/>';
+                    }
+                }
+                $svg .= '</g>';
+            }
+        }
+        $svg .= '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::largestUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * Nested PHP tags are peeled one layer at a time. Each layer used to cost a
+     * full regex pass over the whole input, so the work grew with the square of
+     * the input size.
+     *
+     * @test
+     */
+    public function deeplyNestedPhpTagsAreStrippedQuickly()
+    {
+        $nesting = 16000;
+        $svg = str_repeat('<?p', $nesting) . '<?phpX?>' . str_repeat('hpY?>', $nesting)
+            . '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === stripos($cleanData, '<?php'), 'no PHP tag may survive');
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Without PCRE's JIT, a single pass of the old PHP-tag regex was quadratic on
+     * a long line of openers whose only closer sits on the next line.
+     *
+     * @test
+     */
+    public function unclosedPhpTagsOnOneLineAreHandledQuicklyWithoutJit()
+    {
+        $svg = str_repeat('<?php ', 20000) . "\n?>"
+            . '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
+
+        $result = self::withIniSettings(['pcre.jit' => '0'], function () use ($svg) {
+            $sanitizer = new Sanitizer();
+            $started = microtime(true);
+            $cleanData = $sanitizer->sanitize($svg);
+
+            return [$cleanData, microtime(true) - $started];
+        });
+
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
+        self::assertTrue(false === $result[0] || false === stripos($result[0], '<?php'), 'no PHP tag may survive');
+    }
+
+    /**
+     * Regression guard for the PHP-tag stripper: tags hidden by interleaving, the
+     * short echo form and mixed case must all be removed, and the document must
+     * still sanitize.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function hiddenPhpTagDataProvider()
+    {
+        return [
+            'interleaved' => ['<?p<?php test?>hp echo 1;?>'],
+            'interleaved short echo' => ['<?<?= 1?>= 2?>'],
+            'mixed case' => ['<?PhP echo 1;?>'],
+            'interleaved twice' => ['<?p<?p<?php a?>hp b?>hp c?>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider hiddenPhpTagDataProvider
+     */
+    public function hiddenPhpTagsAreStripped($php)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . $php . '<rect width="10" height="10"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === stripos($cleanData, '<?php'), 'no <?php may survive');
+        self::assertTrue(false === strpos($cleanData, '<?='), 'no <?= may survive');
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Regression guard: a PHP block spanning several lines reaches the parser as a
+     * processing instruction and is removed there.
+     *
+     * @test
+     */
+    public function multiLinePhpBlockIsRemoved()
+    {
+        $svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><?php\necho 1;\n?><rect width=\"10\" height=\"10\"/></svg>";
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === stripos($cleanData, '<?php'), 'no PHP block may survive');
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Many unclosed `image-set('` tokens used to make the remote-reference regex
+     * rescan the rest of the stylesheet from every token.
+     *
+     * @test
+     */
+    public function manyUnclosedImageSetsAreStrippedQuickly()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>'
+            . str_repeat("-webkit-image-set('", 30000)
+            . '</style></svg>';
+
+        $result = self::withIniSettings(['pcre.jit' => '1'], function () use ($svg) {
+            $sanitizer = new Sanitizer();
+            $sanitizer->removeRemoteReferences(true);
+            $started = microtime(true);
+            $cleanData = $sanitizer->sanitize($svg);
+
+            return [$cleanData, microtime(true) - $started];
+        });
+
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
+        self::assertTrue(is_string($result[0]));
+    }
+
+    /**
+     * When PCRE gave up on the image-set input, `preg_replace()` returned null and
+     * assigning that to `textContent` threw a TypeError out of `sanitize()`.
+     *
+     * @test
+     */
+    public function imageSetInputThatOverwhelmsPcreDoesNotThrow()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>'
+            . str_repeat("-webkit-image-set('", 50000)
+            . '</style></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+    }
+
+    /**
+     * If any regex fails (backtrack or recursion limit), `sanitize()` must fail
+     * closed with `false` instead of throwing or returning half-cleaned output.
+     *
+     * @test
+     */
+    public function regexFailureMakesSanitizeReturnFalse()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<style>.a{fill:url(https://evil.example/x)}</style>'
+            . '<a xlink:href="https://example.com/"><rect width="10" height="10"/></a></svg>';
+
+        $cleanData = self::withIniSettings(
+            ['pcre.jit' => '0', 'pcre.backtrack_limit' => '1', 'pcre.recursion_limit' => '1'],
+            function () use ($svg) {
+                $sanitizer = new Sanitizer();
+                $sanitizer->removeRemoteReferences(true);
+
+                return $sanitizer->sanitize($svg);
+            }
+        );
+
+        self::assertFalse($cleanData);
+    }
+
+    /**
+     * Two ways past `removeRemoteReferences(true)`: CSS escapes in presentation
+     * attributes (`fill="url(\2f\2f host)"`), and a backslash in the authority
+     * (`/\host`), which browsers treat as `//host`. Local references must stay.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsEscapedAndBackslashReferences()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/remoteReferenceBypassTest.svg');
+        $expected = file_get_contents($dataDirectory . '/remoteReferenceBypassClean.svg');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * A remote `image-set()` target written with a backslash authority must be
+     * stripped like its `//` equivalent.
+     *
+     * @test
+     */
+    public function removeRemoteReferencesStripsBackslashImageSet()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>x{background:image-set("/\\5c evil.example/track" 1x)}</style>'
+            . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $clean = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($clean));
+        self::assertTrue(false === strpos($clean, 'evil.example'), 'backslash-authority image-set() should be removed');
+    }
+
+    /**
+     * Looking up the element a `<use>` points at used to scan every element with
+     * an id, once per `<use>`, so many ids plus many uses was quadratic.
+     *
+     * @test
+     */
+    public function manyIdsAndManyUsesAreSanitizedQuickly()
+    {
+        $count = 8000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($i = 0; $i < $count; $i++) {
+            $svg .= '<g id="i' . $i . '"/>';
+        }
+        $svg .= str_repeat('<use href="#missing"/>', $count) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame($count, substr_count($cleanData, '<use'), 'uses of a missing id expand to nothing and stay');
+    }
+
+    /**
+     * Every identified ancestor of a `<use>` must account for it, but listing all
+     * nested `<use>` elements once per ancestor was depth x uses.
+     *
+     * @test
+     */
+    public function deeplyNestedIdsWithManyUsesAreSanitizedQuickly()
+    {
+        $depth = 250;
+        $count = 30000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($i = 0; $i < $depth; $i++) {
+            $svg .= '<g id="g' . $i . '">';
+        }
+        $svg .= str_repeat('<use href="#leaf"/>', $count) . str_repeat('</g>', $depth)
+            . '<rect id="leaf" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame($count, substr_count($cleanData, '<use'), 'uses of a plain rect stay');
+    }
+
+    /**
+     * Each node used to be checked against the whole list of elements marked for
+     * removal, even text nodes that can never be on it.
+     *
+     * @test
+     */
+    public function manySelfReferencesAmongManyNodesAreSanitizedQuickly()
+    {
+        $count = 20000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($i = 0; $i < $count; $i++) {
+            $svg .= '<g id="a' . $i . '"><use href="#a' . $i . '"/></g>';
+        }
+        $svg .= str_repeat('<text>x</text>', $count) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(0, substr_count($cleanData, '<use'), 'every self reference is removed');
+        self::assertSame($count, substr_count($cleanData, '<text'), 'text survives');
+    }
+
+    /**
+     * Each element used to have its whole subtree re-walked for unsafe nodes,
+     * on top of the main walk, so deep nesting multiplied the work by the depth.
+     *
+     * @test
+     */
+    public function deeplyNestedDocumentIsSanitizedQuickly()
+    {
+        $depth = 250;
+        $count = 80000;
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<g>', $depth)
+            . str_repeat('<rect width="1" height="1"/><!-- c -->', $count)
+            . str_repeat('</g>', $depth) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame($count, substr_count($cleanData, '<rect'), 'rects survive');
+        self::assertSame(0, substr_count($cleanData, '<!--'), 'comments are removed');
+    }
+
+    /**
+     * Browsers resolve `#id` to the first element with that id. The reference
+     * graph used to keep the last one, so empty decoys with the same ids, placed
+     * after the real groups, hid the whole billion-laughs chain from the
+     * expansion threshold.
+     *
+     * @test
+     */
+    public function duplicateIdDecoysDoNotHideUseExpansion()
+    {
+        $decoys = '<defs>';
+        for ($i = 1; $i <= 10; $i++) {
+            $decoys .= '<g id="a' . $i . '"/>';
+        }
+        $decoys .= '</defs></svg>';
+
+        // Later duplicates of an id that a `<use>` references lose their id, so
+        // decoys a1 to a9 come back as plain groups. Nothing references a10.
+        $cleanDecoys = '<defs>' . str_repeat('<g/>', 9) . '<g id="a10"/></defs></svg>';
+
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = str_replace('</svg>', $decoys, file_get_contents($dataDirectory . '/xlinkLaughsTest.svg'));
+        $expected = str_replace('</svg>', $cleanDecoys, file_get_contents($dataDirectory . '/xlinkLaughsClean.svg'));
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(false);
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Input that strips down to nothing (only PHP tags, or only a DOCTYPE) must
+     * give `false`, not reach `loadXML('')`, which throws a ValueError on PHP 8.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function emptyAfterStrippingDataProvider()
+    {
+        return [
+            'PHP block only' => ['<?php echo 1; ?>'],
+            'short echo only' => ['<?= ?>'],
+            'interleaved PHP blocks only' => ['<?p<?php a?>hp b?>'],
+            'DOCTYPE only' => ['<!DOCTYPE svg>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider emptyAfterStrippingDataProvider
+     */
+    public function inputThatIsEmptyAfterStrippingReturnsFalse($input)
+    {
+        $sanitizer = new Sanitizer();
+
+        self::assertFalse($sanitizer->sanitize($input));
+    }
+
+    /**
+     * Regression guard: the byte-level DOCTYPE stripper cannot read UTF-7, so the
+     * check after parsing must catch a DTD libxml decodes from it.
+     *
+     * @test
+     */
+    public function utf7EncodedDtdIsRejected()
+    {
+        $payload = '<!DOCTYPE svg [<!ENTITY Tab "#">]>'
+            . '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<a xlink:href="&Tab;javascript:alert(1)"><text>x</text></a></svg>';
+        $svg = '<?xml version="1.0" encoding="UTF-7"?>'
+            . str_replace(['<', '>', '[', ']', '!'], ['+ADw-', '+AD4-', '+AFs-', '+AF0-', '+ACE-'], $payload);
+
+        $sanitizer = new Sanitizer();
+
+        self::assertFalse($sanitizer->sanitize($svg));
+    }
+
+    /**
+     * A `<use>` with its own id renders its target, so it is a link in the chain
+     * like any other element. Routing each layer of a billion-laughs chain
+     * through `<use id="Un" href="#Ln">` used to hide the whole expansion.
+     *
+     * @test
+     */
+    public function useElementsWithTheirOwnIdCountTowardsTheThreshold()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="L0"><rect width="1" height="1"/></g>';
+        for ($i = 0; $i < 9; $i++) {
+            $svg .= '<use id="U' . $i . '" href="#L' . $i . '"/>';
+            $svg .= '<g id="L' . ($i + 1) . '">' . str_repeat('<use href="#U' . $i . '"/>', 10) . '</g>';
+        }
+        $svg .= '<use href="#L9"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * The same blind spot let a chain of identified `<use>` elements nest past
+     * the nesting limit.
+     *
+     * @return array<string, array{0: string, 1: int}>
+     */
+    public static function identifiedUseChainDataProvider()
+    {
+        $longChain = '<svg xmlns="http://www.w3.org/2000/svg"><g id="L0"><rect width="1" height="1"/></g>';
+        for ($i = 0; $i < 20; $i++) {
+            $longChain .= '<use id="U' . $i . '" href="#L' . $i . '"/>';
+            $longChain .= '<g id="L' . ($i + 1) . '"><use href="#U' . $i . '"/></g>';
+        }
+        $longChain .= '<use href="#L20"/></svg>';
+
+        $shortChain = '<svg xmlns="http://www.w3.org/2000/svg"><g id="leaf"><rect/></g>'
+            . '<use id="u0" href="#leaf"/><use id="u1" href="#u0"/><use id="u2" href="#u1"/><use id="u3" href="#u2"/></svg>';
+
+        return [
+            'forty links, default limit' => [$longChain, 15],
+            'four links, limit of two' => [$shortChain, 2],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider identifiedUseChainDataProvider
+     */
+    public function useElementsWithTheirOwnIdCountTowardsTheNestingLimit($svg, $limit)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->setUseNestingLimit($limit);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::deepestRenderedUseNesting($cleanData) <= $limit, 'surviving <use> elements must stay within the nesting limit');
+    }
+
+    /**
+     * A `<use>` that references itself, or two identified `<use>` elements that
+     * reference each other, form a loop.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function useLoopDataProvider()
+    {
+        return [
+            'a use that references itself' => ['<svg xmlns="http://www.w3.org/2000/svg"><use id="a" href="#a"/></svg>'],
+            'two uses that reference each other' => ['<svg xmlns="http://www.w3.org/2000/svg"><use id="a" href="#b"/><use id="b" href="#a"/></svg>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider useLoopDataProvider
+     */
+    public function useElementsWithTheirOwnIdCannotHideALoop($svg)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) !== INF, 'the loop must be broken');
+    }
+
+    /**
+     * When the first element with an id is one the cleaner removes, a browser
+     * resolves `#id` to the next element with that id. Duplicate ids must not
+     * let the graph measure a different element from the one that renders.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function removedDecoyDataProvider()
+    {
+        return [
+            'disallowed tag' => ['<foo id="%s"/>'],
+            'script' => ['<script id="%s"/>'],
+            'font with face' => ['<font id="%s" face="x"/>'],
+            'use with a remote href' => ['<use id="%s" href="https://example.com/x.svg#a"/>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider removedDecoyDataProvider
+     */
+    public function duplicateIdDecoysThatTheCleanerRemovesDoNotHideUseExpansion($decoyTemplate)
+    {
+        $decoys = '';
+        for ($i = 1; $i <= 10; $i++) {
+            $decoys .= sprintf($decoyTemplate, 'a' . $i);
+        }
+
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = preg_replace('/<defs>/', '<defs>' . $decoys, file_get_contents($dataDirectory . '/xlinkLaughsTest.svg'), 1);
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($initialData);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * Every element after the first with a given id loses its `id`, so each id
+     * has exactly one possible target. A `<use>` inside a later duplicate
+     * references the first element, not its own ancestor, so it stays.
+     *
+     * @test
+     */
+    public function laterDuplicateIdsAreRemoved()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g id="a"><use href="#a"/></g></svg>';
+        $expected = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g><use href="#a"/></g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * Only ids that a `<use>` references need a single target. A stylesheet's
+     * `#icon` rule styles every element with that id, so duplicates that no
+     * `<use>` references keep their id.
+     *
+     * @test
+     */
+    public function duplicateIdsThatNoUseReferencesKeepTheirStyling()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>#icon{fill:red}</style>'
+            . '<rect id="icon" width="1" height="1"/><rect id="icon" x="2" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(2, substr_count($cleanData, 'id="icon"'));
+    }
+
+    /**
+     * A duplicate id that a `<use>` references only through URL whitespace is
+     * still a referenced id, so its later duplicates lose it.
+     *
+     * @test
+     */
+    public function duplicateIdsReferencedThroughUrlWhitespaceAreStillRemoved()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g id="a"><use href="#a "/></g></svg>';
+        $expected = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/><g><use href="#a "/></g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertXmlStringEqualsXmlString($expected, $cleanData);
+    }
+
+    /**
+     * The graph and the cleaned output must agree on which `href` a `<use>`
+     * follows. Normalising `HrEf` must not overwrite an `href` the graph already
+     * read, and sanitizing the output again must not change it.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function competingHrefDataProvider()
+    {
+        return [
+            'href and HrEf' => ['<g id="a"><use href="#missing" HrEf="#b"/><use href="#missing" HrEf="#b"/></g>'],
+            'HREF and xlink:href' => ['<g id="a"><use HREF="#missing" xlink:href="#b"/><use HREF="#missing" xlink:href="#b"/></g>'],
+            'xlink:href and xlink:HREF' => ['<g id="a"><use xlink:href="#missing" xlink:HREF="#b"/><use xlink:href="#missing" xlink:HREF="#b"/></g>'],
+            'HREF and an empty xlink:href' => ['<g id="a"><use HREF="#b" xlink:href=""/><use HREF="#b" xlink:href=""/></g>'],
+            // Removing the unsafe href makes the xlink:href the live reference.
+            'unsafe href hiding xlink:href' => ['<g id="a"><use href="javascript:void(0)" xlink:href="#b"/><use href="javascript:void(0)" xlink:href="#b"/></g>'],
+        ];
+    }
+
+    /**
+     * Without an `xmlns:xlink` declaration, every `xlink:href` spelling is
+     * removed in one pass. Removing attributes while iterating the live
+     * attribute map used to skip the one after each removal.
+     *
+     * @test
+     */
+    public function everyUnboundXlinkHrefIsRemovedInOnePass()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="#a" xlink:HREF="#b"/>'
+            . '<radialGradient xlink:href="" XLINk:Href="data:image/png"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $first = $sanitizer->sanitize($svg);
+        $second = $sanitizer->sanitize($first);
+
+        self::assertTrue(is_string($first) && is_string($second));
+        self::assertTrue(false === stripos($first, 'xlink:href'), 'every unbound xlink:href spelling should be removed');
+        self::assertXmlStringEqualsXmlString($first, $second);
+    }
+
+    /**
+     * @test
+     * @dataProvider competingHrefDataProvider
+     */
+    public function competingHrefSpellingsCannotChangeTheGraphAfterAnalysis($group)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . $group . '<g id="b"><rect/></g><use id="outer" href="#a"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(self::outerUseSurvivesWithTwoLiveReferences($cleanData), 'the outer <use> must not survive with two live references below it');
+
+        $again = new Sanitizer();
+        $again->useThreshold(2);
+        self::assertXmlStringEqualsXmlString($cleanData, $again->sanitize($cleanData));
+    }
+
+    /**
+     * `#%61` addresses the element with id `a`, because a fragment is
+     * percent-decoded. The graph must resolve it the same way.
+     *
+     * @test
+     */
+    public function percentEncodedFragmentsReachTheSameTarget()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" href="#%61"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(self::outerUseSurvivesWithTwoLiveReferences($cleanData), 'the outer <use> must not survive with two live references below it');
+    }
+
+    /**
+     * An HTML parser lower-cases `<USE>` and `ID` when the output is inlined in a
+     * page, so upper-case spellings must not hide a chain from the graph.
+     *
+     * @test
+     */
+    public function upperCaseUseAndIdDoNotHideUseExpansion()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g ID="L0"><rect width="1" height="1"/></g>';
+        for ($i = 1; $i <= 9; $i++) {
+            $svg .= '<g ID="L' . $i . '">' . str_repeat('<USE href="#L' . ($i - 1) . '"/>', 10) . '</g>';
+        }
+        $svg .= '<USE href="#L9"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound once lower-cased');
+    }
+
+    /**
+     * A `<use>` outside the SVG namespace is invisible to the reference graph, but
+     * an HTML parser puts it back in the SVG namespace when the output is inlined
+     * in a page.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function foreignNamespaceUseDataProvider()
+    {
+        return [
+            'empty namespace' => ['xmlns=""'],
+            'another namespace' => ['xmlns="http://example.com/other"'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider foreignNamespaceUseDataProvider
+     */
+    public function useElementsOutsideTheSvgNamespaceDoNotHideUseExpansion($namespace)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="L0"><rect width="1" height="1"/></g>';
+        for ($i = 1; $i <= 9; $i++) {
+            $svg .= '<g id="L' . $i . '">' . str_repeat('<use ' . $namespace . ' href="#L' . ($i - 1) . '"/>', 10) . '</g>';
+        }
+        $svg .= '<use ' . $namespace . ' href="#L9"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound once inlined');
+    }
+
+    /**
+     * More ways a remote reference used to get past removeRemoteReferences(true).
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function remoteCssBypassDataProvider()
+    {
+        return [
+            // Removing one token joined the text around it into a new one.
+            'removal rebuilds @import' => ['<style>@imp@import x;ort "//evil.example/a.css";</style>'],
+            'removal rebuilds url()' => ['<style>rect{fill:uurl(//decoy.example)rl(//evil.example/a.svg#p)}</style>'],
+            // An escaped `/*`, or a `/*` inside a string, is not a comment, but
+            // the escaped url() between it and the next `*/` was deleted from
+            // the checked copy only.
+            'escaped comment in style attribute' => ['<rect style="a:\\2f\\2a;fill:\\75rl(//evil.example/a.svg#p);b:\\2a\\2f"/>'],
+            'comment inside strings in style attribute' => ['<rect style="font-family:&quot;/*&quot;;fill:\\75rl(//evil.example/a.svg#p);font-family:&quot;*/&quot;"/>'],
+            'escaped comment in style element' => ['<style>a{b:\\2f\\2a}rect{fill:\\75rl(//evil.example/a.svg#p)}a{b:\\2a\\2f}</style>'],
+            // Browsers drop tab, CR and LF anywhere in a URL, and leading
+            // control characters.
+            'tab between the slashes' => ["<style>rect{fill:url(\"/\t/evil.example/a.svg#p\")}</style>"],
+            'tab inside the scheme' => ["<style>rect{fill:url(\"ht\ttps://evil.example/a.svg#p\")}</style>"],
+            'escaped tab inside the scheme' => ['<style>rect{fill:url("ht\\9 tps://evil.example/a.svg#p")}</style>'],
+            'escaped leading control character' => ['<style>rect{fill:url("\\1 //evil.example/a.svg#p")}</style>'],
+            'CR LF after a hex escape' => ["<style>rect{fill:url(\\2f&#13;\n/evil.example/a.svg#p)}</style>"],
+            // A backslash before a line break continues a CSS string.
+            'string line continuation' => ["<style>svg{fill:url(\"ht\\\ntps://evil.example/x\")}</style>"],
+            // A `)` inside an earlier argument does not end image-set().
+            'nested function before a remote image-set candidate' => ['<style>svg{background:image-set(linear-gradient(red,blue) 1x,"\\2f\\2f evil.example/x" 2x)}</style>'],
+            'parenthesis inside a string before a remote image-set candidate' => ['<style>svg{background:image-set("a).png" 1x,"//evil.example/x" 2x)}</style>'],
+            // A special scheme needs no slashes at all after the colon.
+            'escaped scheme with one slash' => ['<style>svg{fill:url(\\68 ttps:/evil.example/x)}</style>'],
+            'scheme with one slash in a style element' => ['<style>svg{fill:url(https:/evil.example/x)}</style>'],
+            'scheme with no slash in a style element' => ['<style>svg{fill:url(https:evil.example/x)}</style>'],
+            'scheme with one slash in an attribute' => ['<rect fill="url(https:/evil.example/x)"/>'],
+            'scheme with one slash in an href' => ['<image href="http:/evil.example/x.png"/>'],
+            'scheme with no slash in a style attribute' => ['<rect style="fill:url(https:evil.example/x)"/>'],
+            'scheme with no slash in image-set()' => ['<style>rect{background:image-set("http:evil.example/x" 1x)}</style>'],
+            'image-set() in a presentation attribute' => ['<rect mask="image-set(\'//evil.example/x\' 1x)"/>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteCssBypassDataProvider
+     */
+    public function remoteReferencesCannotBeRebuiltOrHidden($body)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . $body . '<rect width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote reference should be removed');
+    }
+
+    /**
+     * Regression guard: ordinary CSS with comments, strings, gradients and local
+     * image-set() candidates is left alone under removeRemoteReferences(true).
+     *
+     * @test
+     */
+    public function removeRemoteReferencesKeepsOrdinaryCss()
+    {
+        $css = '/* brand colours */ .a{fill:url(#grad);font-family:"Foo /* not a comment */ Bar"}'
+            . ' .b{background:image-set(linear-gradient(red,blue) 1x,"/local/b.png" 2x)}';
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>' . $css . '</style>'
+            . '<rect style="fill:url(#grad);stroke:\\72 ed" width="1" height="1"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false !== strpos($cleanData, '.a{fill:url(#grad)'), 'local url() should stay');
+        self::assertTrue(false !== strpos($cleanData, '"Foo /* not a comment */ Bar"'), 'strings should stay');
+        self::assertTrue(false !== strpos($cleanData, '"/local/b.png" 2x'), 'local image-set() should stay');
+        self::assertTrue(false !== strpos($cleanData, 'stroke:\\72 ed'), 'escaped style attribute should stay');
+    }
+
+    /**
+     * A CSS escape for a UTF-16 surrogate must not put invalid UTF-8 into the
+     * output.
+     *
+     * @test
+     */
+    public function cssEscapedSurrogatesStayValidUtf8()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<style>a{content:"\\D800"}b{fill:url(//evil.example/x)}</style></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(1, preg_match('//u', $cleanData), 'output must be valid UTF-8');
+    }
+
+    /**
+     * A long run of whitespace after `url(` or `@import` used to make the
+     * remote-reference regexes backtrack over every way to split it.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function longWhitespaceDataProvider()
+    {
+        $spaces = str_repeat(' ', 100000);
+
+        return [
+            'url( in a presentation attribute' => ['<rect fill="url(' . $spaces . 'x)"/>'],
+            '@import in a style attribute' => ['<rect style="@import' . $spaces . 'x"/>'],
+            'url( in a style element' => ['<style>a{fill:url(' . $spaces . 'x)}</style>'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider longWhitespaceDataProvider
+     */
+    public function longWhitespaceAfterUrlIsHandledQuickly($body)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . $body . '</svg>';
+
+        $result = self::withIniSettings(['pcre.jit' => '1'], function () use ($svg) {
+            $sanitizer = new Sanitizer();
+            $sanitizer->removeRemoteReferences(true);
+            $started = microtime(true);
+            $cleanData = $sanitizer->sanitize($svg);
+
+            return [$cleanData, microtime(true) - $started];
+        });
+
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
+        self::assertTrue(is_string($result[0]));
+    }
+
+    /**
+     * Without PCRE's JIT, the comment regex retried the rest of the stylesheet
+     * from every unclosed `/*`.
+     *
+     * @test
+     */
+    public function unclosedCssCommentsAreHandledQuicklyWithoutJit()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>' . str_repeat('/*x', 16000) . '</style></svg>';
+
+        $result = self::withIniSettings(['pcre.jit' => '0'], function () use ($svg) {
+            $sanitizer = new Sanitizer();
+            $sanitizer->removeRemoteReferences(true);
+            $started = microtime(true);
+            $cleanData = $sanitizer->sanitize($svg);
+
+            return [$cleanData, microtime(true) - $started];
+        });
+
+        self::assertTrue($result[1] < self::slowInputCeiling(), sprintf('took %.2fs', $result[1]));
+        self::assertTrue(is_string($result[0]));
+    }
+
+    /**
+     * One element with many attributes. Reading or removing each attribute by
+     * name walks the element's attribute list from the start, which made the
+     * attribute pass quadratic. Elements with more than 4,096 attributes are
+     * now rejected before parsing, so these inputs return false, quickly.
+     *
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function manyAttributesDataProvider()
+    {
+        return [
+            'allowed data attributes, remote references removed' => ['data-a%d="x"', true],
+            'disallowed attributes, default settings' => ['bad-a%d="x"', false],
+            'href-like data attributes, default settings' => ['data-href%d="#a"', false],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider manyAttributesDataProvider
+     */
+    public function manyAttributesOnOneElementAreSanitizedQuickly($template, $removeRemoteReferences)
+    {
+        $attributes = '';
+        for ($i = 0; $i < 60000; $i++) {
+            $attributes .= ' ' . sprintf($template, $i);
+        }
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . '/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences($removeRemoteReferences);
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertFalse($cleanData, 'more than 4,096 attributes on one element is rejected');
+    }
+
+    /**
+     * Before PHP 8.2, stripos() lower-cases the whole haystack on every call, so
+     * calling it once per match with a growing offset is quadratic.
+     *
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function manyCaseInsensitiveMatchesDataProvider()
+    {
+        return [
+            'many DOCTYPEs' => [str_repeat('<!DOCTYPE>', 150000) . '<svg xmlns="http://www.w3.org/2000/svg"/>', false],
+            'many image-set tokens' => ['<svg xmlns="http://www.w3.org/2000/svg"><style>' . str_repeat('image-set', 150000) . '</style></svg>', true],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider manyCaseInsensitiveMatchesDataProvider
+     */
+    public function manyCaseInsensitiveMatchesAreHandledQuickly($svg, $removeRemoteReferences)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences($removeRemoteReferences);
+        $started = microtime(true);
+        $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+    }
+
+    /**
+     * Finding the root `<svg>` used to walk every `<svg>` in the document through
+     * getElementsByTagName(), which before PHP 8.3 searches the document again
+     * for each element.
+     *
+     * @test
+     */
+    public function manySvgElementsAreSanitizedQuickly()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<svg/>', 60000) . '</svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+    }
+
+    /**
+     * The URL parser trims spaces and control characters from both ends of an
+     * href and drops tabs and line breaks anywhere, so `#a ` and `#&#10;a`
+     * both reach the element with id `a`. The graph must read them the same way.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function whitespaceFragmentDataProvider()
+    {
+        return [
+            'trailing space' => ['#a '],
+            'leading space' => [' #a'],
+            'trailing tab' => ['#a&#9;'],
+            'trailing CR' => ['#a&#13;'],
+            'newline inside' => ['#&#10;a'],
+            'tab inside' => ['#&#9;a'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider whitespaceFragmentDataProvider
+     */
+    public function useFragmentsWithUrlWhitespaceReachTheSameTarget($href)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" href="' . $href . '"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(self::outerUseSurvivesWithTwoLiveReferences($cleanData), 'the outer <use> must not survive with two live references below it');
+    }
+
+    /**
+     * The same gap at full scale: a billion-laughs chain whose references all
+     * end in a space.
+     *
+     * @test
+     */
+    public function billionLaughsWithTrailingSpacesIsStopped()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="a0"><rect width="1" height="1"/></g>';
+        for ($level = 1; $level <= 9; $level++) {
+            $svg .= '<g id="a' . $level . '">' . str_repeat('<use href="#a' . ($level - 1) . ' "/>', 10) . '</g>';
+        }
+        $svg .= '<use href="#a9 "/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * Renaming `XLINK:href` to `xlink:href` must keep it in the XLink namespace.
+     * When only a prefix like `XLINK` is bound, setAttribute('xlink:href') made
+     * an attribute in no namespace, which the graph cannot see but an HTML
+     * parser reads as XLink.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function unboundXlinkSpellingDataProvider()
+    {
+        return [
+            'XLINK:href' => ['XLINK', 'XLINK:href'],
+            'Xlink:HREF' => ['Xlink', 'Xlink:HREF'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider unboundXlinkSpellingDataProvider
+     */
+    public function renamedXlinkHrefStaysInTheXlinkNamespace($prefix, $attribute)
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:' . $prefix . '="http://www.w3.org/1999/xlink">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" ' . $attribute . '="#a"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(self::outerUseSurvivesWithTwoLiveReferences($cleanData), 'the outer <use> must not survive with two live references below it');
+
+        $document = new \DOMDocument();
+        self::assertTrue($document->loadXML($cleanData), 'the output must stay well-formed XML');
+    }
+
+    /**
+     * More ways a remote `image-set()` URL got past removeRemoteReferences(true):
+     * a comment holding `)`, a `{}` block inside a var() fallback, and a custom
+     * property carrying the remote string.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function remoteImageSetDataProvider()
+    {
+        return [
+            'comment holding ) after a string holding /*' => ['x{content:"/*"} svg{mask-image:image-set(/* ) */ "https://evil.example/a.png" 1x)}'],
+            '{} block in a var() fallback' => ['svg{--u:"x.png" 2x;mask-image:image-set(var(--u,{}), "https://evil.example/a.png" 1x)}'],
+            'string in a custom property' => ['svg{--u:"https://evil.example/a.png";mask-image:image-set(var(--u) 1x)}'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteImageSetDataProvider
+     */
+    public function remoteImageSetUrlsAreRemovedFromStyleElements($css)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><style>' . $css . '</style></svg>');
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote reference should be removed');
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteImageSetDataProvider
+     */
+    public function remoteImageSetUrlsAreRemovedFromStyleAttributes($css)
+    {
+        $declarations = preg_replace('/^.*?svg\{|\}$/', '', $css);
+        if (strpos($css, 'x{content:"/*"}') === 0) {
+            $declarations = 'content:"/*";' . $declarations;
+        }
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><rect style=\'' . htmlspecialchars($declarations, ENT_QUOTES) . '\'/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote reference should be removed');
+    }
+
+    /**
+     * sanitize() must not raise any notice, including PHP 8.5 deprecations.
+     *
+     * @test
+     */
+    public function sanitizeRaisesNoNotices()
+    {
+        $notices = [];
+        set_error_handler(function ($severity, $message) use (&$notices) {
+            $notices[] = $message;
+
+            return true;
+        });
+
+        try {
+            $sanitizer = new Sanitizer();
+            $cleanData = $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><g id="a"><rect/></g><use href="#a"/></svg>');
+        } finally {
+            restore_error_handler();
+        }
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame([], $notices);
+    }
+
+    /**
+     * An `href` on a `<g>` does nothing, so `<g id="a" href="#a">` is not a loop.
+     * Treating it as one used to wipe the group's graph edges without removing
+     * anything, which hid the `<use>` chains nested inside it.
+     *
+     * @test
+     */
+    public function inertSelfHrefOnAGroupDoesNotHideUseExpansion()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="L0"><rect width="1" height="1"/></g>';
+        for ($i = 1; $i <= 6; $i++) {
+            $svg .= '<g id="L' . $i . '" href="#L' . $i . '"><g id="C' . $i . '">'
+                . str_repeat('<use href="#L' . ($i - 1) . '"/>', 10) . '</g></g>';
+        }
+        $svg .= '<use href="#L6"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 10000, 'surviving <use> elements must not expand without bound');
+    }
+
+    /**
+     * A loop that runs through an element nested inside another one must still
+     * be broken. Marking the outer element as a loop used to clear its graph
+     * edges without removing the `<use>` that closes the loop.
+     *
+     * @test
+     */
+    public function loopThroughANestedElementIsBroken()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="A"><g id="C"><use href="#B"/></g></g><g id="B"><use href="#A"/></g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) !== INF, 'the loop must be broken');
+    }
+
+    /**
+     * minify(true) collapsed whitespace after every security check had run. In
+     * CSS, a hex escape swallows one following space, so collapsing two spaces
+     * to one rebuilt `url(\2f  /host)` into `url(//host)`.
+     *
+     * @test
+     */
+    public function minifyingCannotRebuildARemoteUrl()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $sanitizer->minify(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><style>a{fill:url(\\2f  /evil.example/x)}</style>'
+            . '<rect style="fill:url(\\2f  /evil.example/y)" width="1" height="1"/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, '\\2f /evil.example'), 'minifying must not turn a local path into a remote URL');
+    }
+
+    /**
+     * minify(true) used to collapse `id="a  b"` into `id="a b"` after the `<use>`
+     * graph was built, which connected a `<use href="#a b">` the graph had
+     * measured as pointing at nothing.
+     *
+     * @test
+     */
+    public function minifyingCannotJoinAnIdToAReference()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+            . '<g id="a  b"><use href="#c"/><use href="#c"/></g><g id="c"><rect/></g><use href="#a b"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->minify(true);
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertFalse(
+            false !== strpos($cleanData, 'id="a b"') && false !== strpos($cleanData, 'href="#a b"'),
+            'minifying must not create a reference the graph never measured'
+        );
+    }
+
+    /**
+     * Loop detection used to copy the current path at every step. Long chains of
+     * nested identified groups linked by `<use>` made that copying quadratic in
+     * memory: a 62 KB file needed well over 100 MB.
+     *
+     * @test
+     */
+    public function longNestedChainsDoNotExhaustMemory()
+    {
+        if (!function_exists('memory_reset_peak_usage')) {
+            self::markTestSkipped('Measuring the peak memory of one call needs PHP 8.2 or later.');
+        }
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">';
+        for ($chain = 0; $chain < 14; $chain++) {
+            for ($i = 0; $i < 240; $i++) {
+                $svg .= '<g id="c' . $chain . '_' . $i . '">';
+            }
+            if ($chain < 13) {
+                $svg .= '<use href="#c' . ($chain + 1) . '_0"/>';
+            }
+            $svg .= str_repeat('</g>', 240);
+        }
+        $svg .= '</svg>';
+
+        memory_reset_peak_usage();
+        $before = memory_get_usage();
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+        $used = memory_get_peak_usage() - $before;
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue($used < 32 * 1024 * 1024, sprintf('used %d MB', $used >> 20));
+    }
+
+    /**
+     * Every graph edge used to read the target's `id` again, which walks the
+     * element's attributes. Many attributes before the `id`, times many
+     * references, was quadratic. The attribute count stays under the
+     * 4,096-per-element limit, so the references carry the load.
+     *
+     * @test
+     */
+    public function manyAttributesBeforeAReferencedIdAreHandledQuickly()
+    {
+        $attributes = '';
+        for ($i = 0; $i < 4000; $i++) {
+            $attributes .= ' data-a' . $i . '="x"';
+        }
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . ' id="t"/>'
+            . '<g id="h">' . str_repeat('<use href="#t"/>', 60000) . '</g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+    }
+
+    /**
+     * `srcset` holds a list of URLs, so checking it as one URL missed a remote
+     * candidate after a local one. Inlined in HTML, an `<image>` inside `<title>`
+     * or `<desc>` becomes an `<img>` that fetches it.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function remoteSrcsetDataProvider()
+    {
+        return [
+            'local candidate first' => ['/local.png 1x, https://evil.example/x.png 2x'],
+            'leading comma' => [', https://evil.example/x.png 2x'],
+            'invalid candidate first' => ['x y z, //evil.example/x.png'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider remoteSrcsetDataProvider
+     */
+    public function removeRemoteReferencesRemovesRemoteSrcsetCandidates($srcset)
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><title><image srcset="' . $srcset . '"/></title></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'evil.example'), 'remote srcset candidate should be removed');
+    }
+
+    /**
+     * An attribute spelled `xlink:href` but bound to another namespace is not
+     * XLink in XML, but an HTML parser maps it to XLink when the output is
+     * inlined. Kept next to a real XLink alias such as `data-x:href`, it let the
+     * graph measure one target while the page followed another.
+     *
+     * @test
+     */
+    public function xlinkHrefInTheWrongNamespaceIsRemoved()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="urn:wrong" xmlns:data-x="http://www.w3.org/1999/xlink">'
+            . '<g id="a"><use href="#b"/><use href="#b"/></g><g id="b"><rect/></g>'
+            . '<use id="outer" xlink:href="#a" data-x:href="#missing"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->useThreshold(2);
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'xlink:href="#a"'), 'an xlink:href outside the XLink namespace should be removed');
+    }
+
+    /**
+     * Removing a remote reference from a `<style>` element must be reported, so
+     * callers and the CLI scanner can tell the input was changed.
+     *
+     * @test
+     */
+    public function removingRemoteCssFromAStyleElementIsReported()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(https://evil.example/x.css);</style><rect width="1" height="1"/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(count($sanitizer->getXmlIssues()) > 0, 'the removal should be reported');
+    }
+
+    /**
+     * Every removed element used to add a record to getXmlIssues(), with no
+     * limit. 200,000 disallowed elements in under 1 MB used over 100 MB.
+     *
+     * @test
+     */
+    public function issueRecordsStayWithinTheMemoryBudget()
+    {
+        if (!function_exists('memory_reset_peak_usage')) {
+            self::markTestSkipped('Measuring the peak memory of one call needs PHP 8.2 or later.');
+        }
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<x/>', 200000) . '</svg>';
+
+        memory_reset_peak_usage();
+        $before = memory_get_usage();
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+        $used = memory_get_peak_usage() - $before;
+
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(0, substr_count($cleanData, '<x'), 'every disallowed element is still removed');
+        self::assertTrue($used < 64 * 1024 * 1024, sprintf('used %d MB', $used >> 20));
+    }
+
+    /**
+     * Past the limit, further issues are counted in one closing record instead
+     * of being listed.
+     *
+     * @test
+     */
+    public function issueRecordsAreCappedWithASummary()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<x/>', 1500) . '</svg>');
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertSame(1001, count($issues));
+        self::assertSame("Suspicious tag 'x'", $issues[0]['message']);
+        self::assertTrue(false !== strpos($issues[1000]['message'], '500 more issues'), 'the last record counts the issues left out');
+    }
+
+    /**
+     * `useThreshold()` must count every `<use>` a reference renders, not only the
+     * deepest ones. A chain with one `<use>` per level counted as 1 however
+     * long it was, so 999 uses of a 13-step chain rendered about 14,000 copies
+     * under a threshold of 1,000.
+     *
+     * @test
+     */
+    public function thresholdCountsEveryRenderedUse()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g id="n0"><rect/></g>';
+        for ($i = 1; $i <= 13; $i++) {
+            $svg .= '<g id="n' . $i . '"><use href="#n' . ($i - 1) . '"/></g>';
+        }
+        $svg .= '<g id="n14">' . str_repeat('<use href="#n13"/>', 999) . '</g><use href="#n14"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(self::renderedUseExpansion($cleanData) < 1000, 'every rendered <use> must count toward the threshold');
+    }
+
+    /**
+     * `src` and `srcset` hold URLs. When the output is inlined in HTML, an
+     * `<image>` inside `<title>` or `<desc>` becomes an `<img>`, so script and
+     * document URLs must not survive there, in the default configuration too.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function unsafeSourceDataProvider()
+    {
+        return [
+            'javascript: in src' => ['src="javascript:alert(1)"'],
+            'javascript: with a tab in src' => ['src="java&#9;script:alert(1)"'],
+            'vbscript: in src' => ['src="VBScript:msgbox(1)"'],
+            'HTML data: URL in src' => ['src="data:text/html,x"'],
+            'javascript: in a later srcset candidate' => ['srcset="/a.png 1x, javascript:alert(1) 2x"'],
+            'HTML data: URL in srcset' => ['srcset="data:text/html,x 1x"'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider unsafeSourceDataProvider
+     */
+    public function unsafeUrlSchemesAreRemovedFromSrcAndSrcset($attribute)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><title><image ' . $attribute . '/></title></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === stripos($cleanData, 'script:'), 'a script URL should be removed');
+        self::assertTrue(false === stripos($cleanData, 'data:text/html'), 'an HTML data: URL should be removed');
+    }
+
+    /**
+     * Regression guard: ordinary `src` and `srcset` values stay in the default
+     * configuration.
+     *
+     * @test
+     */
+    public function safeSrcAndSrcsetValuesAreKept()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><title>'
+            . '<image src="/images/a.png" srcset="a.png 1x, https://example.com/b.png 2x"/>'
+            . '<image src="data:image/png;base64,iVBORw0KGgo="/></title></svg>';
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($svg);
+
+        self::assertTrue(false !== strpos($cleanData, 'src="/images/a.png"'), 'a local src should stay');
+        self::assertTrue(false !== strpos($cleanData, 'srcset="a.png 1x, https://example.com/b.png 2x"'), 'an ordinary srcset should stay');
+        self::assertTrue(false !== strpos($cleanData, 'src="data:image/png;base64,iVBORw0KGgo="'), 'an image data: URL should stay');
+    }
+
+    /**
+     * `sanitize('0')` is not empty input: it is a document that fails to parse.
+     * And `sanitize('')` must not leave the previous call's issues behind.
+     *
+     * @test
+     */
+    public function emptyInputIsOnlyTheEmptyStringAndClearsIssues()
+    {
+        $sanitizer = new Sanitizer();
+        $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>');
+        self::assertTrue(count($sanitizer->getXmlIssues()) > 0);
+
+        self::assertSame('', $sanitizer->sanitize(''));
+        self::assertSame([], $sanitizer->getXmlIssues());
+        self::assertFalse($sanitizer->sanitize('0'));
+    }
+
+    /**
+     * Before libxml 2.10, parsing one element's attributes is quadratic, so
+     * the input is checked before parsing. An element with more attributes
+     * than any real SVG uses is rejected.
+     *
+     * @test
+     */
+    public function anElementWithTooManyAttributesIsRejectedBeforeParsing()
+    {
+        $attributes = '';
+        for ($i = 0; $i < 60000; $i++) {
+            $attributes .= ' bad-a' . $i . '="x"';
+        }
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . '/></svg>');
+        $elapsed = microtime(true) - $started;
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertFalse($cleanData);
+        self::assertSame('Too many attributes on one element', $issues[0]['message']);
+        self::assertTrue($elapsed < 0.5, sprintf('took %.2fs', $elapsed));
+    }
+
+    /**
+     * The attribute limit sits at 4,096 per element.
+     *
+     * @return array<string, array{0: int, 1: bool}>
+     */
+    public static function attributeLimitDataProvider()
+    {
+        return [
+            'at the limit' => [4096, true],
+            'one past the limit' => [4097, false],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider attributeLimitDataProvider
+     */
+    public function theAttributeLimitIsFourThousandNinetySix($count, $accepted)
+    {
+        $attributes = '';
+        for ($i = 0; $i < $count; $i++) {
+            $attributes .= ' data-a' . $i . '="x"';
+        }
+
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize('<svg><rect' . $attributes . '/></svg>');
+
+        self::assertSame($accepted, is_string($cleanData));
+    }
+
+    /**
+     * The count must not be fooled by encoding, and must not count `=` that is
+     * not an attribute: inside a quoted value, a comment or a CDATA section.
+     *
+     * @test
+     */
+    public function theAttributeLimitCountsOnlyRealAttributes()
+    {
+        $attributes = '';
+        for ($i = 0; $i < 5000; $i++) {
+            $attributes .= ' bad-a' . $i . '="x"';
+        }
+        $sanitizer = new Sanitizer();
+        self::assertFalse(
+            $sanitizer->sanitize(self::toUtf16('<svg xmlns="http://www.w3.org/2000/svg"><rect' . $attributes . '/></svg>', false, true)),
+            'UTF-16 input is counted too'
+        );
+
+        $equals = str_repeat('a=1 ', 5000);
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><!-- ' . $equals . ' --><style><![CDATA[' . $equals . ']]></style>'
+            . '<rect data-x="' . $equals . '" width="1" height="1"/></svg>';
+        self::assertTrue(is_string($sanitizer->sanitize($svg)), 'quoted values, comments and CDATA are not attributes');
+    }
+
+    /**
+     * The byte-level DOCTYPE stripper cannot read UTF-16 or UTF-32, so an
+     * internal DTD in that input reached the parser. With huge-file parsing on,
+     * older libxml expanded its entities before the document was rejected.
+     *
+     * @test
+     */
+    public function encodedInternalDtdIsRejectedBeforeParsing()
+    {
+        $dtd = '<!ENTITY e0 "1234567890">';
+        for ($level = 1; $level <= 7; $level++) {
+            $dtd .= '<!ENTITY e' . $level . ' "' . str_repeat('&e' . ($level - 1) . ';', 10) . '">';
+        }
+        $svg = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE svg [' . $dtd . ']>'
+            . '<svg xmlns="http://www.w3.org/2000/svg"><a title="&e7;&e7;"/></svg>';
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->setAllowHugeFiles(true);
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize(self::toUtf16($svg, false, true));
+        $elapsed = microtime(true) - $started;
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertFalse($cleanData);
+        self::assertSame('Internal DTD subset is not allowed', $issues[0]['message']);
+        self::assertTrue($elapsed < 0.5, sprintf('took %.2fs', $elapsed));
+    }
+
+    /**
+     * Encodings whose markup is not ASCII bytes, or not UTF-16/UTF-32, cannot be
+     * checked before parsing, and no SVG tool writes them, so they are rejected.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function uncheckableEncodingDataProvider()
+    {
+        $body = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>';
+
+        return [
+            'declared UTF-7' => ['<?xml version="1.0" encoding="UTF-7"?>' . $body],
+            'declared EBCDIC code page' => ['<?xml version="1.0" encoding="IBM037"?>' . $body],
+            'EBCDIC signature' => ["\x4C\x6F\xA7\x94\x93\x40\xA5\x85\x99\xA2\x89\x96\x95\x7E\x7F\xF1\x4B\xF0\x7F\x6F\x6E"],
+            'ASCII bytes declaring UTF-16' => ['<?xml version="1.0" encoding="UTF-16"?>' . $body],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider uncheckableEncodingDataProvider
+     */
+    public function uncheckableEncodingsAreRejected($input)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize($input);
+        $issues = $sanitizer->getXmlIssues();
+
+        self::assertFalse($cleanData);
+        self::assertSame('Unsupported document encoding', $issues[0]['message']);
+    }
+
+    /**
+     * Regression guard: common ASCII-compatible encodings keep working.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function supportedEncodingDataProvider()
+    {
+        return [
+            'UTF-8' => ['UTF-8'],
+            'ISO-8859-1' => ['ISO-8859-1'],
+            'windows-1252' => ['windows-1252'],
+            'US-ASCII' => ['US-ASCII'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider supportedEncodingDataProvider
+     */
+    public function supportedEncodingsStillSanitize($encoding)
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(
+            '<?xml version="1.0" encoding="' . $encoding . '"?><svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false !== strpos($cleanData, '<rect'), 'rect should survive');
+    }
+
+    /**
+     * Any attribute that is not known to be inert is checked for script and
+     * document URLs, as DOMPurify does, so a tag added later cannot activate
+     * a value that was already approved. Inert text attributes such as
+     * `title` keep their value.
+     *
+     * @test
+     */
+    public function unsafeUrlSchemesAreRemovedFromEveryAttributeThatCouldHoldAUrl()
+    {
+        $sanitizer = new Sanitizer();
+        $cleanData = $sanitizer->sanitize(
+            '<svg xmlns="http://www.w3.org/2000/svg"><a poster="javascript:alert(1)" action="data:text/html,x" title="Data: 5, javascript: notes"><text>x</text></a></svg>'
+        );
+
+        self::assertTrue(is_string($cleanData));
+        self::assertTrue(false === strpos($cleanData, 'poster='), 'a script URL in poster should be removed');
+        self::assertTrue(false === strpos($cleanData, 'action='), 'an HTML data: URL in action should be removed');
+        self::assertTrue(false !== strpos($cleanData, 'title="Data: 5, javascript: notes"'), 'an inert text attribute keeps its value');
+    }
+
+    /**
+     * An `<svg>` root in some other namespace is not SVG to an XML reader, but
+     * an HTML parser ignores `xmlns` and makes it live SVG when inlined.
+     *
+     * @test
+     */
+    public function anSvgRootInAnotherNamespaceIsRejected()
+    {
+        $sanitizer = new Sanitizer();
+
+        self::assertFalse($sanitizer->sanitize('<svg xmlns="urn:not-svg"><rect width="1" height="1"/></svg>'));
+        self::assertTrue(is_string($sanitizer->sanitize('<svg><rect width="1" height="1"/></svg>')), 'a root with no namespace still works');
+    }
+
+    /**
+     * Property test, ported from a review harness: random elements built from
+     * the default allowlists, with risky values, under four option sets. Every
+     * result must be a string, raise nothing, stay the same when sanitized
+     * again, and contain no script element, event handler or script URL in an
+     * attribute that can hold a URL.
+     *
+     * @test
+     */
+    public function generatedAllowlistMarkupKeepsTheSanitizerGuarantees()
+    {
+        mt_srand(0x5A17);
+
+        $prototype = new Sanitizer();
+        $tags = array_values(array_filter($prototype->getAllowedTags(), function ($tag) {
+            return $tag !== '#text' && $tag !== 'svg';
+        }));
+        $attributes = array_values(array_filter($prototype->getAllowedAttrs(), function ($attribute) {
+            return $attribute !== 'xmlns' && strpos($attribute, ':') === false;
+        }));
+        $values = [
+            '', '#local', '/relative', 'https://example.invalid/x',
+            'javascript:alert(1)', "java\tscript:alert(1)", 'data:text/html,x',
+            'url(#local)', 'url(https://example.invalid/x)',
+            '</style><img src=x onerror=alert(1)>', '<!--><script>alert(1)</script>',
+            'x;y', '0 0 10 10', 'normal-value',
+        ];
+
+        for ($run = 0; $run < 250; $run++) {
+            $tag = $tags[mt_rand(0, count($tags) - 1)];
+            $chosen = [];
+            $attributeText = '';
+            for ($i = mt_rand(0, 6); $i > 0; $i--) {
+                $attribute = $attributes[mt_rand(0, count($attributes) - 1)];
+                if (isset($chosen[$attribute])) {
+                    continue;
+                }
+                $chosen[$attribute] = true;
+                $attributeText .= ' ' . $attribute . '="' . htmlspecialchars($values[mt_rand(0, count($values) - 1)], ENT_QUOTES, 'UTF-8') . '"';
+            }
+            $text = htmlspecialchars($values[mt_rand(0, count($values) - 1)], ENT_NOQUOTES, 'UTF-8');
+            $input = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+                . '<' . $tag . $attributeText . '>' . $text . '</' . $tag . '></svg>';
+
+            foreach ([false, true] as $removeRemote) {
+                foreach ([false, true] as $minify) {
+                    $sanitizer = new Sanitizer();
+                    $sanitizer->removeXMLTag(true);
+                    $sanitizer->removeRemoteReferences($removeRemote);
+                    $sanitizer->minify($minify);
+
+                    $warnings = [];
+                    set_error_handler(function ($severity, $message) use (&$warnings) {
+                        $warnings[] = $message;
+
+                        return true;
+                    });
+                    try {
+                        $once = $sanitizer->sanitize($input);
+                        $twice = is_string($once) ? $sanitizer->sanitize($once) : $once;
+                    } finally {
+                        restore_error_handler();
+                    }
+
+                    $context = sprintf('run %d, remote %d, minify %d: %s', $run, $removeRemote, $minify, $input);
+                    self::assertSame([], $warnings, $context);
+                    self::assertTrue(is_string($once), $context);
+                    self::assertSame($once, $twice, 'sanitizing again must not change the output: ' . $context);
+                    self::assertSame([], self::unsafeOutputProblems($once), $context);
+                }
+            }
+        }
+    }
+
+    /**
+     * Script elements, event handlers, and script or HTML-document URLs in any
+     * attribute that is not known to be inert.
+     *
+     * @param string $svg
+     * @return string[]
+     */
+    private static function unsafeOutputProblems($svg)
+    {
+        $inert = ['alt', 'class', 'for', 'id', 'label', 'name', 'pattern', 'placeholder', 'role', 'summary', 'title', 'value', 'style', 'xmlns'];
+        $document = new \DOMDocument();
+        if (!$document->loadXML($svg)) {
+            return ['output is not well-formed XML'];
+        }
+
+        $problems = [];
+        foreach ((new \DOMXPath($document))->query('//*') as $element) {
+            if (strtolower($element->localName) === 'script') {
+                $problems[] = 'script element';
+            }
+            foreach ($element->attributes as $attribute) {
+                $name = strtolower($attribute->localName);
+                if (strpos($name, 'on') === 0) {
+                    $problems[] = 'event handler ' . $attribute->nodeName;
+                }
+                if (in_array($name, $inert, true) || strpos($name, 'data-') === 0 || strpos($name, 'aria-') === 0) {
+                    continue;
+                }
+                // Read it as the URL parser does: drop tabs and line breaks, and
+                // trim spaces and control characters from both ends.
+                $value = trim(str_replace(["\t", "\n", "\r"], '', $attribute->value), "\x00..\x20");
+                if (preg_match('~^(?:(?:java|vb)script:|data:(?!image/))~i', $value)) {
+                    $problems[] = 'unsafe URL in ' . $attribute->nodeName;
+                }
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Before PHP 8.1, DOMNode::removeChild() searches the parent's child list
+     * for the node, so removing many children of one parent was quadratic:
+     * 40,000 removals took over 10 seconds on PHP 8.0. This covers every kind
+     * of node the sanitizer removes or replaces.
+     *
+     * @test
+     */
+    public function manyRemovedNodesInOneParentAreRemovedQuickly()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><g>'
+            . str_repeat('<rect width="1" height="1"/><!-- c --><![CDATA[x]]><x/>', 40000)
+            . '</g></svg>';
+
+        $sanitizer = new Sanitizer();
+        $started = microtime(true);
+        $cleanData = $sanitizer->sanitize($svg);
+        $elapsed = microtime(true) - $started;
+
+        self::assertTrue($elapsed < self::slowInputCeiling(), sprintf('took %.2fs', $elapsed));
+        self::assertTrue(is_string($cleanData));
+        self::assertSame(40000, substr_count($cleanData, '<rect'), 'rects survive');
+        self::assertSame(0, substr_count($cleanData, '<!--') + substr_count($cleanData, '<x') + substr_count($cleanData, 'CDATA'));
+    }
+
+    /**
+     * The time limit for the crafted slow inputs, scaled to the machine.
+     *
+     * Shared CI runners can be several times slower than a developer machine.
+     * The limit is the larger of SLOW_INPUT_CEILING and eight times a fixed,
+     * linear reference workload, so it follows the machine's speed while a
+     * quadratic regression, which grows far faster, still fails.
+     *
+     * @return float
+     */
+    private static function slowInputCeiling()
+    {
+        static $ceiling = null;
+        if ($ceiling === null) {
+            $svg = '<svg xmlns="http://www.w3.org/2000/svg">' . str_repeat('<g><rect width="1" height="1"/></g>', 20000) . '</svg>';
+            $sanitizer = new Sanitizer();
+            $sanitizer->sanitize($svg);
+            $started = microtime(true);
+            $sanitizer->sanitize($svg);
+            $ceiling = max(self::SLOW_INPUT_CEILING, 8 * (microtime(true) - $started));
+        }
+
+        return $ceiling;
+    }
+
+    /**
+     * Encode an ASCII string as UTF-16.
+     *
+     * @param string $ascii
+     * @param bool $bigEndian
+     * @param bool $withBom
+     * @return string
+     */
+    private static function toUtf16($ascii, $bigEndian, $withBom)
+    {
+        $encoded = $withBom ? ($bigEndian ? "\xFE\xFF" : "\xFF\xFE") : '';
+        for ($i = 0, $length = strlen($ascii); $i < $length; $i++) {
+            $encoded .= $bigEndian ? "\0" . $ascii[$i] : $ascii[$i] . "\0";
+        }
+
+        return $encoded;
+    }
+
+    /**
+     * Run a callback with some ini settings changed, restoring them afterwards.
+     *
+     * @param array<string, string> $settings
+     * @param callable $callback
+     * @return mixed
+     */
+    private static function withIniSettings(array $settings, $callback)
+    {
+        $previous = [];
+        foreach ($settings as $name => $value) {
+            $previous[$name] = ini_get($name);
+            ini_set($name, $value);
+        }
+
+        try {
+            return $callback();
+        } finally {
+            foreach ($previous as $name => $value) {
+                ini_set($name, $value);
+            }
+        }
+    }
+
+    /**
+     * Index the document the way a browser resolves `#id`: the first element with
+     * an id wins, and names match in any case, because an HTML parser lower-cases
+     * them when the SVG is inlined in a page.
+     *
+     * @param string $svg
+     * @return array{0: \DOMXPath, 1: array<string, \DOMElement>}
+     */
+    private static function indexRenderedDocument($svg)
+    {
+        $document = new \DOMDocument();
+        $document->loadXML($svg);
+        $xPath = new \DOMXPath($document);
+
+        $byId = [];
+        foreach ($xPath->query('//*') as $element) {
+            foreach ($element->attributes as $attribute) {
+                if (strtolower($attribute->nodeName) === 'id' && !isset($byId[$attribute->value])) {
+                    $byId[$attribute->value] = $element;
+                }
+            }
+        }
+
+        return [$xPath, $byId];
+    }
+
+    /**
+     * The element a `<use>` renders: a plain `href` in any case wins over
+     * `xlink:href`, and the fragment is percent-decoded.
+     *
+     * @param \DOMElement $use
+     * @param array<string, \DOMElement> $byId
+     * @return \DOMElement|null
+     */
+    private static function renderedUseTarget(\DOMElement $use, array $byId)
+    {
+        $plain = null;
+        $xlink = null;
+        foreach ($use->attributes as $attribute) {
+            // An attribute literally named `xlink:href` in no namespace is still
+            // XLink to an HTML parser.
+            $isUnboundXlink = strtolower($attribute->nodeName) === 'xlink:href' && (string) $attribute->prefix === '';
+            if (strtolower($attribute->localName) !== 'href' && !$isUnboundXlink) {
+                continue;
+            }
+            if ((string) $attribute->prefix === '' && !$isUnboundXlink) {
+                $plain = $plain === null ? $attribute->value : $plain;
+            } else {
+                $xlink = $xlink === null ? $attribute->value : $xlink;
+            }
+        }
+        $href = $plain !== null ? $plain : $xlink;
+        if ($href === null) {
+            return null;
+        }
+        // The URL parser trims spaces and control characters from both ends and
+        // drops tabs and line breaks anywhere.
+        $href = str_replace(["\t", "\n", "\r"], '', trim($href, "\x00..\x20"));
+        if (strpos($href, '#') !== 0) {
+            return null;
+        }
+        $id = rawurldecode(substr($href, 1));
+
+        return isset($byId[$id]) ? $byId[$id] : null;
+    }
+
+    /**
+     * Walk every surviving `<use>` as a browser renders it, counting `<use>`
+     * elements at any depth inside the referenced element. $combine folds the
+     * values of the nested uses. A reference loop gives INF.
+     *
+     * @param string $svg
+     * @param callable $combine function (int|float $carry, int|float $value): int|float
+     * @return float|int
+     */
+    private static function walkRenderedUses($svg, $combine)
+    {
+        list($xPath, $byId) = self::indexRenderedDocument($svg);
+        $useQuery = "descendant-or-self::*[translate(local-name(), 'USE', 'use')='use']";
+
+        $memo = [];
+        $visiting = [];
+        $walk = function (\DOMElement $use) use (&$walk, &$memo, &$visiting, $byId, $xPath, $useQuery, $combine) {
+            $target = self::renderedUseTarget($use, $byId);
+            if ($target === null) {
+                return 1;
+            }
+
+            $key = spl_object_hash($target);
+            if (isset($visiting[$key])) {
+                return INF;
+            }
+            if (!isset($memo[$key])) {
+                $visiting[$key] = true;
+                $inner = 0;
+                foreach ($xPath->query($useQuery, $target) as $nested) {
+                    $inner = $combine($inner, $walk($nested));
+                }
+                unset($visiting[$key]);
+                $memo[$key] = $inner;
+            }
+
+            return 1 + $memo[$key];
+        };
+
+        $largest = 0;
+        foreach ($xPath->query("//*[translate(local-name(), 'USE', 'use')='use']") as $use) {
+            $largest = max($largest, $walk($use));
+        }
+
+        return $largest;
+    }
+
+    /**
+     * For the small threshold-of-two fixtures: does `<use id="outer">` survive
+     * while group `a`, which it renders, holds two `<use>` elements that still
+     * reach a real target? That is an expansion the threshold must stop.
+     *
+     * @param string $svg
+     * @return bool
+     */
+    private static function outerUseSurvivesWithTwoLiveReferences($svg)
+    {
+        list($xPath, $byId) = self::indexRenderedDocument($svg);
+        if (!isset($byId['outer'], $byId['a']) || self::renderedUseTarget($byId['outer'], $byId) !== $byId['a']) {
+            return false;
+        }
+
+        $live = 0;
+        foreach ($xPath->query("descendant::*[translate(local-name(), 'USE', 'use')='use']", $byId['a']) as $use) {
+            if (self::renderedUseTarget($use, $byId) !== null) {
+                $live++;
+            }
+        }
+
+        return $live >= 2;
+    }
+
+    /**
+     * The largest number of `<use>` instances any single surviving `<use>`
+     * renders, the `<use>` itself included.
+     *
+     * @param string $svg
+     * @return float|int
+     */
+    private static function renderedUseExpansion($svg)
+    {
+        return self::walkRenderedUses($svg, function ($carry, $value) {
+            return $carry + $value;
+        });
+    }
+
+    /**
+     * The longest chain of nested `<use>` instances in the rendered document.
+     *
+     * @param string $svg
+     * @return float|int
+     */
+    private static function deepestRenderedUseNesting($svg)
+    {
+        return self::walkRenderedUses($svg, function ($carry, $value) {
+            return max($carry, $value);
+        });
+    }
+
+    /**
+     * Wrap the contents of every `<g id="aN">` in the billion-laughs fixtures in a
+     * plain `<g>`. Those fixtures contain no other `<g>` elements.
+     *
+     * @param string $svg
+     * @return string
+     */
+    private static function wrapIdentifiedGroupContents($svg)
+    {
+        $svg = preg_replace('/(<g id="a\d+">)/', '$1<g>', $svg);
+        $svg = str_replace('</g>', '</g></g>', $svg);
+
+        return preg_replace('/<g id="(a\d+)" \/>/', '<g id="$1"><g/></g>', $svg);
+    }
+
+    /**
+     * The largest number of `<use>` instances any single `<use>` in the document
+     * expands to when rendered, counting `<use>` elements at any depth inside the
+     * referenced element. A reference loop counts as infinite.
+     *
+     * @param string $svg
+     * @return float|int
+     */
+    private static function largestUseExpansion($svg)
+    {
+        $document = new \DOMDocument();
+        $document->loadXML($svg);
+        $xPath = new \DOMXPath($document);
+
+        $byId = [];
+        foreach ($xPath->query('//*[@id]') as $element) {
+            $byId[$element->getAttribute('id')] = $element;
+        }
+
+        $memo = [];
+        $visiting = [];
+        $expand = function (\DOMElement $use) use (&$expand, &$memo, &$visiting, $byId, $xPath) {
+            $href = $use->getAttribute('href');
+            if ($href === '') {
+                $href = $use->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+            }
+            if (strpos($href, '#') !== 0 || !isset($byId[substr($href, 1)])) {
+                return 1;
+            }
+
+            $target = $byId[substr($href, 1)];
+            $key = spl_object_hash($target);
+            if (isset($visiting[$key])) {
+                return INF;
+            }
+            if (!isset($memo[$key])) {
+                $visiting[$key] = true;
+                $inner = 0;
+                foreach ($xPath->query("descendant-or-self::*[local-name()='use']", $target) as $nested) {
+                    $inner += $expand($nested);
+                }
+                unset($visiting[$key]);
+                $memo[$key] = $inner;
+            }
+
+            return 1 + $memo[$key];
+        };
+
+        $largest = 0;
+        foreach ($xPath->query("//*[local-name()='use']") as $use) {
+            $largest = max($largest, $expand($use));
+        }
+
+        return $largest;
     }
 }
