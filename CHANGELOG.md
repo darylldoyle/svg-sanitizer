@@ -4,13 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
-
-<!-- On release: rename to [1.1.0] with the date, and link each advisory. -->
+## [1.1.0] - 2026-10-19
 
 This is a security release. Everyone using 1.0.0 or earlier should upgrade.
 The public API has not changed, but some input is now cleaned differently. See
 "Changed" below before you upgrade.
+
+It fixes these advisories:
+
+- [GHSA-q546-85r6-f39q](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-q546-85r6-f39q):
+  in Safari, SMIL animations could change a link's `href` after sanitizing.
+- [GHSA-3vh3-jf65-656w](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-3vh3-jf65-656w):
+  remote references could get past `removeRemoteReferences(true)`.
+- [GHSA-vjg7-f2wj-gqqh](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-vjg7-f2wj-gqqh):
+  the 1.0.0 DOCTYPE stripping could be avoided, which brought back the
+  DTD-entity XSS.
+- [GHSA-94x8-pw3c-6qcq](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-94x8-pw3c-6qcq):
+  CSS handling under `removeRemoteReferences(true)` could be slow, and could
+  throw.
+- [GHSA-hrwm-vcc9-hcm4](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-hrwm-vcc9-hcm4):
+  the `<use>` reference graph could take exponential time, and its limits could
+  be avoided.
+- [GHSA-cgcm-4g72-hfgw](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-cgcm-4g72-hfgw):
+  `sanitize()` could throw instead of returning `false`.
+- [GHSA-2v7c-jx29-jprp](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-2v7c-jx29-jprp):
+  stripping PHP tags took quadratic time.
 
 ### Security
 
@@ -58,6 +76,8 @@ The public API has not changed, but some input is now cleaned differently. See
   - the `<use>` reference graph
   - walking the document, which no longer holds a PHP object for every node at
     once (costly before PHP 8.4)
+  - removing nodes, which was quadratic on PHP before 8.1 when many children
+    of one element were removed
   - the list of issues, which is now capped
 - `sanitize()` no longer throws. Input it cannot process safely now returns
   `false`. That includes input that is empty once PHP tags or the `DOCTYPE` are
