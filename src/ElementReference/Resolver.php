@@ -178,7 +178,10 @@ class Resolver
             $this->addReference($element, $nearest, $ancestorIds);
         }
 
-        foreach ($element->childNodes as $child) {
+        // Follow the sibling links. Before PHP 8.1, iterating childNodes with
+        // foreach looked each child up by position, which was quadratic in the
+        // number of children.
+        for ($child = $element->firstChild; $child !== null; $child = $child->nextSibling) {
             if ($child instanceof \DOMElement) {
                 $this->walkReferences($child, $nearest, $ancestorIds, $useNamespace);
             }

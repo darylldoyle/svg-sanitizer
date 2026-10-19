@@ -80,6 +80,13 @@ class Sanitizer
     protected $omittedXmlIssues = 0;
 
     /**
+     * Scratch fragment that removeNode() moves nodes through.
+     *
+     * @var \DOMDocumentFragment|null
+     */
+    protected $removedNodes;
+
+    /**
      * The most issues getXmlIssues() lists. Further issues are counted in one
      * closing record instead.
      */
@@ -469,6 +476,26 @@ class Sanitizer
                 }
             }
         }
+    }
+
+    /**
+     * Remove a node from the document.
+     *
+     * Before PHP 8.1, DOMNode::removeChild() searches the parent's child list
+     * for the node first, so removing many children of one parent was
+     * quadratic. Moving the node into a scratch fragment unlinks it directly,
+     * and removing it from there is instant, because it is the fragment's only
+     * child.
+     *
+     * @param \DOMNode $node
+     */
+    protected function removeNode(\DOMNode $node)
+    {
+        if ($this->removedNodes === null || $this->removedNodes->ownerDocument !== $node->ownerDocument) {
+            $this->removedNodes = $node->ownerDocument->createDocumentFragment();
+        }
+        $this->removedNodes->appendChild($node);
+        $this->removedNodes->removeChild($node);
     }
 
     /**
@@ -935,16 +962,16 @@ class Sanitizer
              * remove <use> elements.
              */
             if ('use' === $currentElement->nodeName && in_array($currentElement, $elementsToRemove)) {
-                $currentElement->parentNode->removeChild($currentElement);
                 $this->addXmlIssue('Invalid \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
+                $this->removeNode($currentElement);
                 continue;
             }
 
             if ($currentElement instanceof \DOMElement) {
                 // If the tag isn't in the whitelist, remove it and continue with next iteration
                 if (!in_array(strtolower($currentElement->tagName), $this->allowedTags)) {
-                    $currentElement->parentNode->removeChild($currentElement);
                     $this->addXmlIssue('Suspicious tag \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
+                    $this->removeNode($currentElement);
                     continue;
                 }
 
@@ -956,8 +983,8 @@ class Sanitizer
                     && ($currentElement->tagName !== 'use'
                         || $currentElement->namespaceURI !== $this->xmlDocument->documentElement->namespaceURI)
                 ) {
-                    $currentElement->parentNode->removeChild($currentElement);
                     $this->addXmlIssue('Suspicious tag \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
+                    $this->removeNode($currentElement);
                     continue;
                 }
 
@@ -987,8 +1014,8 @@ class Sanitizer
                     if ($this->isUseTagDirty($currentElement)
                         || ($this->elementReferenceResolver !== null && $this->isUseTagExceedingThreshold($currentElement))
                     ) {
-                        $currentElement->parentNode->removeChild($currentElement);
                         $this->addXmlIssue('Suspicious \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
+                        $this->removeNode($currentElement);
                         continue;
                     }
                 }
@@ -1004,8 +1031,8 @@ class Sanitizer
                     }
 
                     if ($breaksOutOfForeignContent) {
-                        $currentElement->parentNode->removeChild($currentElement);
                         $this->addXmlIssue('Suspicious tag \'' . $currentElement->tagName . '\'', $currentElement->getLineNo());
+                        $this->removeNode($currentElement);
                         continue;
                     }
                 }
@@ -1089,14 +1116,14 @@ class Sanitizer
              * remove <use> elements.
              */
             if (in_array($useElement, $elementsToRemove)) {
-                $useElement->parentNode->removeChild($useElement);
                 $this->addXmlIssue('Invalid \'' . $useElement->tagName . '\'', $useElement->getLineNo());
+                $this->removeNode($useElement);
                 continue;
             }
 
             if ($this->isUseTagExceedingThreshold($useElement)) {
-                $useElement->parentNode->removeChild($useElement);
                 $this->addXmlIssue('Suspicious \'' . $useElement->tagName . '\'', $useElement->getLineNo());
+                $this->removeNode($useElement);
             }
         }
     }
@@ -1923,11 +1950,14 @@ class Sanitizer
         // Replace CDATA node with encoded text node
         if ($currentElement instanceof \DOMCdataSection) {
             $textNode = $currentElement->ownerDocument->createTextNode($currentElement->nodeValue);
-            $currentElement->parentNode->replaceChild($textNode, $currentElement);
+            // insertBefore() and removeNode() rather than replaceChild(), which,
+            // like removeChild(), searches the parent's children before PHP 8.1.
+            $currentElement->parentNode->insertBefore($textNode, $currentElement);
+            $this->removeNode($currentElement);
         // If the element doesn't have a tagname, remove it and continue with next iteration
         } elseif (!$currentElement instanceof \DOMElement && !$currentElement instanceof \DOMText) {
-            $currentElement->parentNode->removeChild($currentElement);
             $this->addXmlIssue('Suspicious node \'' . $currentElement->nodeName . '\'', $currentElement->getLineNo());
+            $this->removeNode($currentElement);
             return;
         }
 
