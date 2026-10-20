@@ -3039,6 +3039,52 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * Input that ends inside a tag, or in UTF-16 or UTF-32 inside a DOCTYPE,
+     * used to push the checks before parsing past the end of the string, which
+     * threw a ValueError on PHP 8 and raised a warning on PHP 7.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function unclosedTagDataProvider()
+    {
+        return [
+            'lone <' => ['<'],
+            'unclosed element' => ['<a'],
+            'unclosed root' => ['<svg'],
+            'unclosed child after an attribute' => ['<svg xmlns="http://www.w3.org/2000/svg"><rect width="10"'],
+            'lone < after the root' => ['<svg></svg><'],
+            'UTF-16 unclosed root' => [self::toUtf16('<svg', false, true)],
+            'UTF-16 unclosed DOCTYPE' => [self::toUtf16('<!DOCTYPE svg', false, true)],
+            'UTF-16 DOCTYPE keyword only' => [self::toUtf16('<!DOCTYPE', false, true)],
+            'UTF-16 DOCTYPE ending on a quote' => [self::toUtf16('<!DOCTYPE svg PUBLIC "x"', false, true)],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider unclosedTagDataProvider
+     */
+    public function unclosedTagsAreRejectedWithoutNotices($input)
+    {
+        $notices = [];
+        set_error_handler(function ($severity, $message) use (&$notices) {
+            $notices[] = $message;
+
+            return true;
+        });
+
+        try {
+            $sanitizer = new Sanitizer();
+            $cleanData = $sanitizer->sanitize($input);
+        } finally {
+            restore_error_handler();
+        }
+
+        self::assertFalse($cleanData);
+        self::assertSame([], $notices);
+    }
+
+    /**
      * Encodings whose markup is not ASCII bytes, or not UTF-16/UTF-32, cannot be
      * checked before parsing, and no SVG tool writes them, so they are rejected.
      *

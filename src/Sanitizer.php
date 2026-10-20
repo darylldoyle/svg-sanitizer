@@ -746,6 +746,9 @@ class Sanitizer
                 }
                 $i = $close;
             }
+            if ($i >= $length) {
+                return false;
+            }
             $offset = $i + 1;
         }
 
@@ -806,6 +809,9 @@ class Sanitizer
                     return false;
                 }
                 $i = $close;
+            }
+            if ($i >= $length) {
+                return false;
             }
             $offset = $i + 1;
         }
