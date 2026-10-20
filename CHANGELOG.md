@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.1] - 2026-10-20
+
+This release fixes a bug that was new in 1.1.0. Everyone using 1.1.0 should
+upgrade.
+
+It fixes this advisory:
+
+- [GHSA-f7cw-vfxq-7ph2](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-f7cw-vfxq-7ph2):
+  `sanitize()` could throw on input that ends inside an unclosed tag.
+
+### Fixed
+
+- `sanitize()` no longer throws a `ValueError` on PHP 8, or raises a warning on
+  PHP 7, when the input ends inside a tag that is never closed. A single `<`
+  or a truncated upload was enough. It now returns `false`, as 1.0.0 did. This
+  bug was new in 1.1.0.
+- The checks that run before parsing now fail closed too. If one of them ever
+  throws, `sanitize()` returns `false` and reports the error in
+  `getXmlIssues()`.
+
 ## [1.1.0] - 2026-10-19
 
 This is a security release. Everyone using 1.0.0 or earlier should upgrade.

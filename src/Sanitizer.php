@@ -310,6 +310,34 @@ class Sanitizer
             return '';
         }
 
+        $this->resetInternal();
+        $this->setUpBefore();
+
+        // Input we cannot process safely (a failed regex, a document the
+        // reference graph rejects, or anything unexpected) fails closed with
+        // false instead of throwing out of sanitize(). That includes the checks
+        // before parsing.
+        try {
+            $dirty = $this->prepareForParsing($dirty);
+            $clean = $dirty === false ? false : $this->sanitizeDocument($dirty);
+        } catch (\Throwable $e) {
+            $this->addXmlIssue($e->getMessage(), 0);
+            $clean = false;
+        } finally {
+            $this->resetAfter();
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Strip and check the raw input before it reaches libxml.
+     *
+     * @param string $dirty
+     * @return string|false The input to parse, or false if it must be rejected
+     */
+    protected function prepareForParsing($dirty)
+    {
         /*
          * remove php tags, including ones hidden inside other tags
          * i.e. <?p<?php test?>hp echo . ' danger! ';?>
@@ -321,20 +349,14 @@ class Sanitizer
         // and DTD-defaulted attributes from ever reaching libxml.
         $dirty = $this->removeDoctype($dirty);
         if ($dirty === false) {
-            $this->xmlIssues = array(array(
-                'message' => 'Nested DOCTYPE declaration',
-                'line' => 0,
-            ));
+            $this->addXmlIssue('Nested DOCTYPE declaration', 0);
             return false;
         }
 
         // Stripping can leave nothing behind (input that was only PHP tags or a
         // DOCTYPE). That is not a document, and loadXML('') would throw.
         if (trim($dirty) === '') {
-            $this->xmlIssues = array(array(
-                'message' => 'Document is empty',
-                'line' => 0,
-            ));
+            $this->addXmlIssue('Document is empty', 0);
             return false;
         }
 
@@ -347,22 +369,7 @@ class Sanitizer
             return false;
         }
 
-        $this->resetInternal();
-        $this->setUpBefore();
-
-        // Input we cannot process safely (a failed regex, a document the
-        // reference graph rejects, or anything unexpected) fails closed with
-        // false instead of throwing out of sanitize().
-        try {
-            $clean = $this->sanitizeDocument($dirty);
-        } catch (\Throwable $e) {
-            $this->addXmlIssue($e->getMessage(), 0);
-            $clean = false;
-        } finally {
-            $this->resetAfter();
-        }
-
-        return $clean;
+        return $dirty;
     }
 
     /**
@@ -746,6 +753,9 @@ class Sanitizer
                 }
                 $i = $close;
             }
+            if ($i >= $length) {
+                return false;
+            }
             $offset = $i + 1;
         }
 
@@ -806,6 +816,9 @@ class Sanitizer
                     return false;
                 }
                 $i = $close;
+            }
+            if ($i >= $length) {
+                return false;
             }
             $offset = $i + 1;
         }
