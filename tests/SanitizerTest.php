@@ -1820,6 +1820,44 @@ class SanitizerTest extends TestCase
     }
 
     /**
+     * Every prefix of a document, in each encoding libxml reads, must give a
+     * string or false. Truncated uploads are common, and sanitize() must never
+     * throw or warn on one.
+     *
+     * @test
+     */
+    public function everyTruncationOfADocumentReturnsStringOrFalse()
+    {
+        $svg = '<?xml version="1.0"?>'
+            . '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x" [<!ENTITY a "b">]>'
+            . '<svg xmlns="http://www.w3.org/2000/svg"><!-- c --><![CDATA[x]]><?pi y?>'
+            . '<rect width="10" a=\'1\'/><a href="#x"><use href="#y"/></a>'
+            . '<style>a{b:url("c")}</style></svg>';
+        $encodings = [
+            'UTF-8' => $svg,
+            'UTF-16LE' => self::toUtf16($svg, false, true),
+            'UTF-16BE' => self::toUtf16($svg, true, true),
+            'UTF-32LE' => self::toUtf32($svg),
+        ];
+
+        foreach ($encodings as $encoding => $document) {
+            foreach ([false, true] as $removeRemoteReferences) {
+                $sanitizer = new Sanitizer();
+                $sanitizer->removeRemoteReferences($removeRemoteReferences);
+                for ($length = 1, $total = strlen($document); $length <= $total; $length++) {
+                    $input = substr($document, 0, $length);
+                    $result = $sanitizer->sanitize($input);
+
+                    self::assertTrue(
+                        is_string($result) || $result === false,
+                        sprintf('%s input cut to %d bytes did not give a string or false', $encoding, $length)
+                    );
+                }
+            }
+        }
+    }
+
+    /**
      * Regression guard: the byte-level DOCTYPE stripper cannot read UTF-7, so the
      * check after parsing must catch a DTD libxml decodes from it.
      *
@@ -3358,6 +3396,22 @@ class SanitizerTest extends TestCase
         $encoded = $withBom ? ($bigEndian ? "\xFE\xFF" : "\xFF\xFE") : '';
         for ($i = 0, $length = strlen($ascii); $i < $length; $i++) {
             $encoded .= $bigEndian ? "\0" . $ascii[$i] : $ascii[$i] . "\0";
+        }
+
+        return $encoded;
+    }
+
+    /**
+     * Encode an ASCII string as UTF-32LE, with a byte order mark.
+     *
+     * @param string $ascii
+     * @return string
+     */
+    private static function toUtf32($ascii)
+    {
+        $encoded = "\xFF\xFE\0\0";
+        for ($i = 0, $length = strlen($ascii); $i < $length; $i++) {
+            $encoded .= $ascii[$i] . "\0\0\0";
         }
 
         return $encoded;
