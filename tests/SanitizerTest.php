@@ -3676,4 +3676,87 @@ class SanitizerTest extends TestCase
 
         return $largest;
     }
+
+    /**
+     * sanitizeDocument() cleans a parsed document in place, like sanitize()
+     * does for a string.
+     */
+    public function testSanitizeDocumentCleansInPlace()
+    {
+        $dataDirectory = __DIR__ . '/data';
+        $initialData = file_get_contents($dataDirectory . '/svgTestOne.svg');
+        $expected = file_get_contents($dataDirectory . '/svgCleanOne.svg');
+
+        $document = new \DOMDocument();
+        $document->loadXML($initialData);
+
+        $sanitizer = new Sanitizer();
+        self::assertTrue($sanitizer->sanitizeDocument($document));
+        self::assertXmlStringEqualsXmlString($expected, $document->saveXML());
+        self::assertNotEmpty($sanitizer->getXmlIssues());
+    }
+
+    /**
+     * Nodes added through the DOM, which a string never passes through the
+     * parser as, are cleaned too.
+     */
+    public function testSanitizeDocumentRemovesBuiltNodes()
+    {
+        $document = new \DOMDocument();
+        $svg = $document->appendChild($document->createElementNS('http://www.w3.org/2000/svg', 'svg'));
+        $svg->appendChild($document->createElement('script', 'alert(1)'));
+        $svg->appendChild($document->createProcessingInstruction('php', 'echo 1;'));
+        $link = $svg->appendChild($document->createElement('a'));
+        $link->setAttribute('href', 'javascript:alert(1)');
+        $link->setAttribute('onclick', 'alert(1)');
+        $remote = $svg->appendChild($document->createElement('image'));
+        $remote->setAttribute('href', 'https://example.com/a.png');
+
+        $sanitizer = new Sanitizer();
+        $sanitizer->removeRemoteReferences(true);
+        self::assertTrue($sanitizer->sanitizeDocument($document));
+
+        self::assertXmlStringEqualsXmlString(
+            '<svg xmlns="http://www.w3.org/2000/svg"><a/><image/></svg>',
+            $document->saveXML()
+        );
+    }
+
+    /**
+     * A rejected document is emptied, so it cannot be used by mistake.
+     */
+    public function testSanitizeDocumentEmptiesRejectedDocument()
+    {
+        $document = new \DOMDocument();
+        $document->loadXML('<svg xmlns="http://example.com/not-svg"><script>alert(1)</script></svg>');
+
+        $sanitizer = new Sanitizer();
+        self::assertFalse($sanitizer->sanitizeDocument($document));
+        self::assertFalse($document->hasChildNodes());
+        self::assertSame('Root element is not in the SVG namespace', $sanitizer->getXmlIssues()[0]['message']);
+
+        $document = new \DOMDocument();
+        $document->loadXML('<div><svg/><script>alert(1)</script></div>');
+        self::assertFalse($sanitizer->sanitizeDocument($document));
+        self::assertFalse($document->hasChildNodes());
+
+        self::assertFalse($sanitizer->sanitizeDocument(new \DOMDocument()));
+        self::assertSame('Document is empty', $sanitizer->getXmlIssues()[0]['message']);
+    }
+
+    /**
+     * The `<use>` limits apply to a parsed document as well.
+     */
+    public function testSanitizeDocumentRemovesUseLoops()
+    {
+        $document = new \DOMDocument();
+        $document->loadXML(
+            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+            . '<g id="a"><use xlink:href="#b"/></g><g id="b"><use xlink:href="#a"/></g></svg>'
+        );
+
+        $sanitizer = new Sanitizer();
+        self::assertTrue($sanitizer->sanitizeDocument($document));
+        self::assertSame(0, $document->getElementsByTagName('use')->length);
+    }
 }
