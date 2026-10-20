@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [1.1.1] - 2026-10-20
+
+This release fixes a bug that was new in 1.1.0. Everyone using 1.1.0 should
+upgrade.
+
+It fixes this advisory:
+
+- [GHSA-f7cw-vfxq-7ph2](https://github.com/darylldoyle/svg-sanitizer/security/advisories/GHSA-f7cw-vfxq-7ph2):
+  `sanitize()` could throw on input that ends inside an unclosed tag.
 
 ### Fixed
 
