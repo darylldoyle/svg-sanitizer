@@ -319,7 +319,7 @@ class Sanitizer
         // before parsing.
         try {
             $dirty = $this->prepareForParsing($dirty);
-            $clean = $dirty === false ? false : $this->sanitizeDocument($dirty);
+            $clean = $dirty === false ? false : $this->parseAndSanitize($dirty);
         } catch (\Throwable $e) {
             $this->addXmlIssue($e->getMessage(), 0);
             $clean = false;
@@ -373,12 +373,57 @@ class Sanitizer
     }
 
     /**
+     * Sanitize an already parsed document in place.
+     *
+     * This runs the same checks and cleaning as sanitize(), without serializing
+     * and parsing the document again. The root must be a single `<svg>`
+     * element. The checks that sanitize() runs on the raw input (PHP tags,
+     * DOCTYPE stripping, attribute counts) do not apply, because the document
+     * has already been parsed; processing instructions, comments and the
+     * DOCTYPE node are removed like any other node that is not an element or
+     * text.
+     *
+     * If the document cannot be sanitized, it is emptied and false is
+     * returned. getXmlIssues() says why.
+     *
+     * @param \DOMDocument $document
+     * @return bool
+     */
+    public function sanitizeDocument(\DOMDocument $document)
+    {
+        $this->xmlIssues = array();
+        $this->omittedXmlIssues = 0;
+
+        $this->xmlDocument = $document;
+        $this->setUpBefore();
+
+        try {
+            $clean = $this->cleanDocument();
+        } catch (\Throwable $e) {
+            $this->addXmlIssue($e->getMessage(), 0);
+            $clean = false;
+        } finally {
+            $this->resetAfter();
+        }
+
+        // Fail closed: a document that was rejected, or that cleaning stopped
+        // halfway through, must not be used.
+        if (!$clean) {
+            while ($document->firstChild !== null) {
+                $document->removeChild($document->firstChild);
+            }
+        }
+
+        return $clean;
+    }
+
+    /**
      * Parse and clean the document. Expects setUpBefore() to have run.
      *
      * @param string $dirty
      * @return string|false
      */
-    protected function sanitizeDocument($dirty)
+    protected function parseAndSanitize($dirty)
     {
         // LIBXML_NONET: never fetch anything over the network while parsing.
         // External entities are already not loaded; this states it outright.
@@ -396,6 +441,36 @@ class Sanitizer
             return false;
         }
 
+        if (!$this->cleanDocument()) {
+            return false;
+        }
+
+        // Save cleaned XML to a variable
+        if ($this->removeXMLTag) {
+            $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, $this->xmlOptions);
+        } else {
+            $clean = $this->xmlDocument->saveXML($this->xmlDocument, $this->xmlOptions);
+        }
+
+        // Remove any extra whitespaces when minifying. Text and attribute values
+        // were already collapsed before the security checks ran (see
+        // collapseWhitespace()), so this only touches the serializer's own
+        // line breaks and cannot change a value that was checked.
+        if ($this->minifyXML) {
+            $clean = $this->pregReplace('/\s+/', ' ', $clean);
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Check and clean the parsed document in $this->xmlDocument, in place.
+     * Expects setUpBefore() to have run.
+     *
+     * @return bool False if the document must be rejected
+     */
+    protected function cleanDocument()
+    {
         // removeDoctype() works on raw bytes, so a DTD can still reach libxml in
         // an encoding it cannot read (UTF-16, for instance). By now libxml has
         // already applied the DTD's entities and attribute defaults, so the only
@@ -408,6 +483,11 @@ class Sanitizer
             || $doctype->notations->length > 0
         )) {
             $this->addXmlIssue('Internal DTD subset is not allowed', 0);
+            return false;
+        }
+
+        if ($this->xmlDocument->documentElement === null) {
+            $this->addXmlIssue('Document is empty', 0);
             return false;
         }
 
@@ -440,22 +520,7 @@ class Sanitizer
         $this->elementReferenceResolver->collect();
         $this->removeUnsafeUseElements($this->elementReferenceResolver->getElementsToRemove());
 
-        // Save cleaned XML to a variable
-        if ($this->removeXMLTag) {
-            $clean = $this->xmlDocument->saveXML($this->xmlDocument->documentElement, $this->xmlOptions);
-        } else {
-            $clean = $this->xmlDocument->saveXML($this->xmlDocument, $this->xmlOptions);
-        }
-
-        // Remove any extra whitespaces when minifying. Text and attribute values
-        // were already collapsed before the security checks ran (see
-        // collapseWhitespace()), so this only touches the serializer's own
-        // line breaks and cannot change a value that was checked.
-        if ($this->minifyXML) {
-            $clean = $this->pregReplace('/\s+/', ' ', $clean);
-        }
-
-        return $clean;
+        return true;
     }
 
     /**

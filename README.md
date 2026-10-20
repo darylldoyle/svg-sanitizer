@@ -43,6 +43,21 @@ It also returns `false` for input it will not hand to the XML parser:
 
 `getXmlIssues()` says why.
 
+## Sanitizing a parsed document
+
+If you already have the SVG as a `DOMDocument`, for example an inline `<svg>` taken from an HTML page, `sanitizeDocument()` cleans it in place, without serializing and parsing it again:
+
+```php
+$document = new DOMDocument();
+$document->appendChild($document->importNode($svgNode, true));
+
+if ($sanitizer->sanitizeDocument($document)) {
+    // $document is clean
+}
+```
+
+The root must be a single `<svg>` element. If the document is rejected, `sanitizeDocument()` returns `false` and empties the document. `getXmlIssues()` says why.
+
 ## Options
 
 You may pass your own whitelist of tags and attributes by using the `Sanitizer::setAllowedTags` and `Sanitizer::setAllowedAttrs` methods respectively.

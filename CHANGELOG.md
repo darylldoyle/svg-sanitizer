@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- `sanitizeDocument(\DOMDocument $document)` sanitizes an already parsed
+  document in place, without a serialize and parse round trip. It returns
+  `false` and empties the document if the document is rejected. The protected
+  method that had this name, which parses and cleans a string, is now
+  `parseAndSanitize()`. Subclasses that overrode it must be renamed.
+
 ## [1.1.1] - 2026-10-20
 
 This release fixes a bug that was new in 1.1.0. Everyone using 1.1.0 should
