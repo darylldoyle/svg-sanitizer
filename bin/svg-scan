@@ -1,0 +1,193 @@
+#!/usr/bin/env php
+<?php
+
+// File: bin/svg-scan
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use enshrined\svgSanitize\Sanitizer;
+use Symfony\Component\Console\Application;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\OutputInterface;
+
+$application = new Application('SVG Scanner', '1.0.0');
+
+$scanCommand = new Command('scan');
+$scanCommand
+    ->setDescription('Scan SVG files for issues')
+    ->addArgument('files', InputArgument::IS_ARRAY | InputArgument::OPTIONAL, 'SVG files to scan')
+    ->addOption('path', 'p', InputOption::VALUE_REQUIRED, 'Path to directory containing SVG files')
+    ->addOption('fix', 'f', InputOption::VALUE_NONE, 'Automatically fix issues found in SVG files')
+    ->addOption('recursive', 'r', InputOption::VALUE_NONE, 'Scan directories recursively')
+    ->addOption('help', 'h', InputOption::VALUE_NONE, 'Display this help message')
+    ->setCode(function (InputInterface $input, OutputInterface $output) use ($scanCommand) {
+        $files = $input->getArgument('files');
+        $path = $input->getOption('path');
+        $fix = $input->getOption('fix');
+        $recursive = $input->getOption('recursive');
+        $help = $input->getOption('help');
+
+        // Display help if --help option is used or no arguments/options are provided
+        if ($help || (empty($files) && empty($path))) {
+            $output->writeln($scanCommand->getHelp());
+            $output->writeln("\n<info>Usage:</info>");
+            $output->writeln("  svg-scan [options] [files...]");
+            $output->writeln("\n<info>Examples:</info>");
+            $output->writeln("  svg-scan file1.svg file2.svg             # Scan specific SVG files");
+            $output->writeln("  svg-scan --path=/path/to/dir             # Scan all SVG files in a directory");
+            $output->writeln("  svg-scan --path=/path/to/dir --recursive # Scan SVG files recursively");
+            $output->writeln("  svg-scan --fix file1.svg                 # Fix issues in the specified SVG file");
+            return Command::SUCCESS;
+        }
+
+        // Initialize result structure
+        $result = [
+            'totals' => [
+                'errors' => 0,
+            ],
+            'messages' => [],
+            'files' => [],
+        ];
+
+        // Validate input: we need either files or a path
+        if (empty($files) && empty($path)) {
+            $result['messages'][] = 'Error: No files specified and no path provided. Use arguments to specify files or --path option for a directory.';
+            $output->writeln(json_encode($result, JSON_PRETTY_PRINT));
+            return Command::FAILURE;
+        }
+
+        $sanitizer = new Sanitizer();
+        $filesToScan = [];
+
+        // Process directory path if provided
+        if (!empty($path)) {
+            if (!is_dir($path)) {
+                $result['messages'][] = "Error: Directory not found: {$path}";
+                $output->writeln(json_encode($result, JSON_PRETTY_PRINT));
+                return Command::FAILURE;
+            }
+
+            try {
+                $finder = new Finder();
+                $finder->files()->name('*.svg');
+
+                if ($recursive) {
+                    $finder->in($path);
+                } else {
+                    $finder->in($path)->depth(0);
+                }
+
+                foreach ($finder as $file) {
+                    $filesToScan[] = $file->getRealPath();
+                }
+            } catch (\Exception $e) {
+                $result['messages'][] = "Error scanning directory: " . $e->getMessage();
+                $output->writeln(json_encode($result, JSON_PRETTY_PRINT));
+                return Command::FAILURE;
+            }
+        }
+
+        // Add individual files to the scan list
+        foreach ($files as $file) {
+            if (!file_exists($file)) {
+                $result['messages'][] = "Warning: File not found: {$file}";
+                continue;
+            }
+
+            if (pathinfo($file, PATHINFO_EXTENSION) !== 'svg') {
+                $result['messages'][] = "Warning: Skipping non-SVG file: {$file}";
+                continue;
+            }
+
+            $filesToScan[] = realpath($file);
+        }
+
+        // Scan all files
+        foreach ($filesToScan as $filePath) {
+            $fileResult = scanSvg($sanitizer, $filePath, $fix);
+            $result['files'][$filePath] = $fileResult;
+
+            // Count errors
+            if (!empty($fileResult['errors'])) {
+                $result['totals']['errors'] += count($fileResult['errors']);
+            }
+        }
+
+        if (count($filesToScan) === 0) {
+            $result['messages'][] = "No SVG files found to scan.";
+        }
+
+        // Output the result
+        $output->writeln(json_encode($result, JSON_PRETTY_PRINT));
+
+        return $result['totals']['errors'] > 0 ? Command::FAILURE : Command::SUCCESS;
+    });
+
+// Add a detailed help message for the command
+$scanCommand->setHelp(<<<EOT
+<info>Description:</info>
+  The SVG Scanner tool scans SVG files for potential security issues and other problems.
+  It can also automatically fix detected issues if requested.
+
+<info>Arguments:</info>
+  <comment>files</comment>                    SVG files to scan (optional, can be multiple)
+
+<info>Options:</info>
+  <comment>-p, --path</comment>               Path to directory containing SVG files
+  <comment>-f, --fix</comment>                Automatically fix issues found in SVG files
+  <comment>-r, --recursive</comment>          Scan directories recursively
+  <comment>-h, --help</comment>               Display this help message
+EOT
+);
+
+/**
+ * Scan an SVG file for issues
+ *
+ * @param Sanitizer $sanitizer The sanitizer instance
+ * @param string $filePath Path to the SVG file
+ * @param bool $fix Whether to fix issues
+ * @return array Result of the scan
+ */
+function scanSvg(Sanitizer $sanitizer, string $filePath, bool $fix): array
+{
+    $result = [
+        'errors' => [],
+        'fixed' => false
+    ];
+
+    // Read the SVG content
+    $svgContent = file_get_contents($filePath);
+    if ($svgContent === false) {
+        $result['errors'][] = 'Failed to read file';
+        return $result;
+    }
+
+    // Clean the SVG
+    $cleanSvg = $sanitizer->sanitize($svgContent);
+
+    // Get any issues found during sanitization
+    $xmlIssues = $sanitizer->getXmlIssues();
+    if (!empty($xmlIssues)) {
+        $result['errors'] = array_merge($result['errors'], $xmlIssues);
+    }
+
+    // Check for removed elements or attributes
+    if ($cleanSvg !== $svgContent) {
+        $result['errors'][] = 'SVG contains potentially unsafe elements or attributes';
+
+        // Fix the SVG if requested
+        if ($fix) {
+            file_put_contents($filePath, $cleanSvg);
+            $result['fixed'] = true;
+        }
+    }
+
+    return $result;
+}
+
+$application->add($scanCommand);
+$application->setDefaultCommand('scan', true);
+$application->run();
