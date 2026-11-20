@@ -3529,7 +3529,7 @@ class SanitizerTest extends TestCase
                 return 1;
             }
 
-            $key = spl_object_hash($target);
+            $key = function_exists('spl_object_id') ? spl_object_id($target) : spl_object_hash($target);
             if (isset($visiting[$key])) {
                 return INF;
             }
@@ -3652,7 +3652,7 @@ class SanitizerTest extends TestCase
             }
 
             $target = $byId[substr($href, 1)];
-            $key = spl_object_hash($target);
+            $key = function_exists('spl_object_id') ? spl_object_id($target) : spl_object_hash($target);
             if (isset($visiting[$key])) {
                 return INF;
             }
