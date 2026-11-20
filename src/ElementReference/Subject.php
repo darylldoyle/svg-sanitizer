@@ -115,7 +115,7 @@ class Subject
     {
         $onPath = array();
         foreach ($subjects as $subject) {
-            $onPath[spl_object_hash($subject)] = true;
+            $onPath[self::objectKey($subject)] = true;
         }
 
         return $this->findLoop($onPath, $level);
@@ -128,7 +128,7 @@ class Subject
      * the way back. Copying a path array at every step instead was quadratic in
      * memory on long chains of nested identified elements.
      *
-     * @param array<string, bool> $onPath Subjects on the current path
+     * @param array<int|string, bool> $onPath Subjects on the current path, by objectKey()
      * @param int $level The current level of nesting
      * @return bool
      * @throws \enshrined\svgSanitize\Exceptions\NestingException
@@ -139,7 +139,7 @@ class Subject
             throw new \enshrined\svgSanitize\Exceptions\NestingException('Nesting level too high, aborting', 1570713498, null, $this->getElement());
         }
 
-        $key = spl_object_hash($this);
+        $key = self::objectKey($this);
         if (isset($onPath[$key])) {
             return true;
         }
@@ -356,5 +356,18 @@ class Subject
         $this->loopFreeDepth = null;
         $this->useCounts = [];
         $this->renderedUseCount = null;
+    }
+
+    /**
+     * A key for an object, unique among the objects that exist at the time:
+     * spl_object_id() where PHP has it (7.2 and later), since spl_object_hash()
+     * is deprecated as of PHP 8.6, and spl_object_hash() on PHP 7.1.
+     *
+     * @param object $object
+     * @return int|string
+     */
+    private static function objectKey($object)
+    {
+        return function_exists('spl_object_id') ? spl_object_id($object) : spl_object_hash($object);
     }
 }

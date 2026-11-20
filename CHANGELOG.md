@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- No more "Function spl_object_hash() is deprecated" on PHP 8.6. The check for
+  `<use>` loops keys subjects by `spl_object_id()`, or by `spl_object_hash()`
+  on PHP 7.1, which has no `spl_object_id()`.
+
 ## [1.1.1] - 2026-10-20
 
 This release fixes a bug that was new in 1.1.0. Everyone using 1.1.0 should
